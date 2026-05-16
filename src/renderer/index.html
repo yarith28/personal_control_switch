@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <title>Git Sync</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-loading">
+    <div class="bg-blob blob-1"></div>
+    <div class="bg-blob blob-2"></div>
+    <div class="bg-blob blob-3"></div>
+
+    <div class="container">
+      <header class="header" id="titlebar">
+        <nav class="tab-bar" id="tab-bar">
+          <button class="tab active" id="tab-git-sync" data-tab="git-sync" type="button">Git Sync</button>
+          <button class="tab" id="tab-cross-sync" data-tab="cross-sync" type="button">Cross Sync</button>
+          <button class="tab" id="tab-commit-tool" data-tab="commit-tool" type="button">Commit Tool</button>
+        </nav>
+        <div class="window-controls" id="window-controls">
+          <button class="win-btn win-min" id="win-min" title="Minimize">
+            <span data-icon="minus" data-icon-size="9" data-icon-stroke="1.95"></span>
+          </button>
+          <button class="win-btn win-max" id="win-max" title="Maximize">
+            <span data-icon="square" data-icon-size="9" data-icon-stroke="1.8"></span>
+          </button>
+          <button class="win-btn win-close" id="win-close" title="Close">
+            <span data-icon="x" data-icon-size="9" data-icon-stroke="1.95"></span>
+          </button>
+        </div>
+      </header>
+
+      <div class="page" id="page-git-sync" data-page="git-sync">
+        <div class="toolbar">
+          <button id="add-project" class="btn btn-primary">+ Add project</button>
+          <div class="toolbar-spacer"></div>
+          <div class="help-wrap">
+            <button id="help-toggle" class="btn-select-toggle icon-only" title="Quick help">
+              <span data-icon="circleHelp" data-icon-size="12" data-icon-stroke="1.8"></span>
+            </button>
+          </div>
+          <button id="fetch-all" class="btn-select-toggle icon-only" title="Fetch all projects" disabled>
+            <span data-icon="arrowDownUp" data-icon-size="12" data-icon-stroke="1.8"></span>
+          </button>
+          <button id="multi-select-btn" class="btn-select-toggle icon-only" title="Batch select">
+            <span data-icon="listChecks" data-icon-size="12" data-icon-stroke="1.8"></span>
+          </button>
+          <button id="organize-btn" class="btn-select-toggle icon-only" title="Edit / organize">
+            <span data-icon="pencil" data-icon-size="11" data-icon-stroke="1.8"></span>
+          </button>
+          <button id="collapse-btn" class="btn-select-toggle icon-only" title="Collapse all folders" disabled>
+            <span class="icon-collapse" data-icon="chevronsUp" data-icon-size="12" data-icon-stroke="1.8"></span>
+            <span class="icon-expand" data-icon="chevronsDown" data-icon-size="12" data-icon-stroke="1.8"></span>
+          </button>
+          <div class="shared-tab-controls" id="shared-tab-controls">
+            <button id="output-toggle" class="btn-select-toggle icon-only" title="Toggle log">
+              <span data-icon="logs" data-icon-size="11" data-icon-stroke="1.8"></span>
+            </button>
+            <div class="settings-wrap">
+              <button id="settings-toggle" class="btn-select-toggle icon-only" title="Settings">
+                <span data-icon="settings2" data-icon-size="12" data-icon-stroke="1.8"></span>
+              </button>
+              <div class="settings-panel" id="settings-panel">
+                <div class="settings-row">
+                  <div class="settings-label">Theme</div>
+                  <div class="theme-swatches" id="theme-swatches"></div>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label">Font</div>
+                  <div class="font-picker" id="font-picker"></div>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label">Compact</div>
+                  <button class="toggle-switch" id="compact-toggle" type="button" aria-pressed="false"></button>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label" title="Run batch operations in parallel instead of one at a time">Burst</div>
+                  <button class="toggle-switch" id="burst-toggle" type="button" aria-pressed="false"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="edit-bar" id="edit-bar">
+          <button id="add-folder-btn" class="btn btn-primary">+ Folder</button>
+        </div>
+        <div class="select-bar" id="select-bar">
+          <label class="select-all" id="select-all-label">
+            <input type="checkbox" id="select-all" />
+            <span class="checkbox-box">
+              <span class="checkbox-check" data-icon="check" data-icon-size="9" data-icon-stroke="2.1"></span>
+              <span class="checkbox-dash" data-icon="minus" data-icon-size="8" data-icon-stroke="2.1"></span>
+            </span>
+            <span>All</span>
+          </label>
+          <div class="spacer"></div>
+          <button id="pull-selected" class="btn btn-pull" disabled>Pull</button>
+          <button id="push-selected" class="btn btn-push" disabled>Push</button>
+          <button id="fetch-selected" class="btn btn-fetch" disabled>Fetch</button>
+        </div>
+
+        <div id="projects" class="projects">
+          <div class="empty">
+            <div class="empty-title">Nothing here yet</div>
+            <div class="empty-sub">Hit "Add project" to get started</div>
+          </div>
+        </div>
+
+        <div class="output-wrap collapsed" id="output-wrap">
+          <div id="output" class="output" role="log" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div class="page" id="page-cross-sync" data-page="cross-sync" hidden>
+        <div class="cross" id="cross-content"></div>
+      </div>
+
+      <div class="page" id="page-commit-tool" data-page="commit-tool" hidden>
+        <div class="toolbar commit-tool-toolbar">
+          <div class="toolbar-spacer"></div>
+        </div>
+        <div class="commit-tool-workspace" id="commit-tool-workspace"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="confirm-modal" hidden>
+      <div class="modal-card">
+        <div class="modal-message" id="modal-message"></div>
+        <div class="modal-detail" id="modal-detail"></div>
+        <input class="modal-input" id="modal-input" type="text" hidden />
+        <label class="modal-option" id="modal-option" hidden>
+          <input id="modal-option-input" type="checkbox" />
+          <span class="checkbox-box">
+            <span data-icon="check" data-icon-size="9" data-icon-stroke="2.1" data-icon-class="checkbox-check"></span>
+          </span>
+          <span id="modal-option-label"></span>
+        </label>
+        <div class="modal-actions">
+          <button class="btn modal-cancel" id="modal-cancel">Cancel</button>
+          <button class="btn modal-confirm" id="modal-confirm">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="helper-overlay" id="helper-overlay" hidden>
+      <div class="helper-backdrop"></div>
+      <div class="helper-card" role="dialog" aria-modal="true" aria-labelledby="helper-title">
+        <div class="helper-header">
+          <div>
+            <div class="helper-eyebrow">Quick tour</div>
+            <div class="helper-title" id="helper-title">This is what the toolbar and project actions do</div>
+          </div>
+          <button class="helper-close" id="helper-close" title="Close helper">
+            <span data-icon="x" data-icon-size="11" data-icon-stroke="1.9"></span>
+          </button>
+        </div>
+        <div class="helper-section">
+          <div class="helper-section-title">Toolbar</div>
+          <div class="helper-grid">
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-text">+ Add project</span>
+              <div class="helper-copy">Add one or more Git repo folders to the list.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="circleHelp" data-icon-size="12" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Open this quick tour again anytime.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="arrowDownUp" data-icon-size="12" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Fetch every tracked repo in one go.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="listChecks" data-icon-size="12" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Select multiple repos for batch fetch, pull, or push.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="pencil" data-icon-size="11" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Reorder repos and folders, rename folders, pin items, and organize the list.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="chevronsUp" data-icon-size="12" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Collapse or expand all folders at once.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="logs" data-icon-size="11" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Show or hide the activity log.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="settings2" data-icon-size="12" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Change theme, font, compact mode, and burst mode.</div>
+            </div>
+          </div>
+        </div>
+        <div class="helper-section">
+          <div class="helper-section-title">Per-project actions</div>
+          <div class="helper-grid">
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-text">Repo name</span>
+              <div class="helper-copy">Click a repo name to open it with your tools.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="arrowDown" data-icon-size="11" data-icon-stroke="1.85"></span></span>
+              <div class="helper-copy">Pull the latest changes for that repo.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="arrowUp" data-icon-size="11" data-icon-stroke="1.85"></span></span>
+              <div class="helper-copy">Push your local commits to the remote.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="gitCommitVertical" data-icon-size="11" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Stage everything and make or amend a quick commit.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="folderInput" data-icon-size="11" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Move a repo into a folder while organizing.</div>
+            </div>
+            <div class="helper-row">
+              <span class="helper-pill helper-pill-icon"><span data-icon="pin" data-icon-size="11" data-icon-stroke="1.8"></span></span>
+              <div class="helper-copy">Pin important repos or folders near the top.</div>
+            </div>
+          </div>
+        </div>
+        <div class="helper-footer">
+          <div class="helper-note">The question button will reopen this helper anytime.</div>
+          <button class="btn helper-confirm" id="helper-confirm">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

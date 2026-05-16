@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1024" y2="1024">
+      <stop offset="0" stop-color="#fce7f3"/>
+      <stop offset="0.5" stop-color="#ede9fe"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+    <radialGradient id="sheen" gradientUnits="userSpaceOnUse" cx="260" cy="60" r="780">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" gradientUnits="userSpaceOnUse" x1="236" y1="249" x2="788" y2="775">
+      <stop offset="0" stop-color="#a855f7" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ec4899" stop-opacity="0.5"/>
+    </linearGradient>
+    <clipPath id="squircle"><rect width="1024" height="1024" rx="230"/></clipPath>
+    <mask id="holesBody" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="416.2" cy="248.9" r="30" fill="#000"/>
+      <circle cx="607.8" cy="775.1" r="30" fill="#000"/>
+    </mask>
+    <mask id="holesRim" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="416.2" cy="248.9" r="26" fill="#000"/>
+      <circle cx="607.8" cy="775.1" r="26" fill="#000"/>
+    </mask>
+    <mask id="glyphMask" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#000"/>
+      <path d="M 236.3 560.6 A 280 280 0 0 1 754.5 372" fill="none" stroke="#fff" stroke-width="58" stroke-linecap="round"/>
+      <path d="M 787.7 463.4 A 280 280 0 0 1 269.5 652" fill="none" stroke="#fff" stroke-width="58" stroke-linecap="round"/>
+      <g transform="translate(754.5,372) rotate(60)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="#fff" stroke="#fff" stroke-width="26" stroke-linejoin="round"/></g>
+      <g transform="translate(269.5,652) rotate(-120)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="#fff" stroke="#fff" stroke-width="26" stroke-linejoin="round"/></g>
+      <circle cx="416.2" cy="248.9" r="68" fill="#fff"/>
+      <circle cx="607.8" cy="775.1" r="68" fill="#fff"/>
+      <circle cx="416.2" cy="248.9" r="30" fill="#000"/>
+      <circle cx="607.8" cy="775.1" r="30" fill="#000"/>
+    </mask>
+    <filter id="blobBlur" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="70"/>
+    </filter>
+    <filter id="refrBlur" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="softShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#7c3aed" flood-opacity="0.35"/>
+    </filter>
+    <filter id="spec" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="b"/>
+      <feSpecularLighting in="b" surfaceScale="8" specularConstant="1" specularExponent="18" lighting-color="#ffffff" result="s">
+        <fePointLight x="300" y="80" z="420"/>
+      </feSpecularLighting>
+      <feComposite in="s" in2="SourceAlpha" operator="in" result="sc"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="sc"/></feMerge>
+    </filter>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <g filter="url(#blobBlur)" opacity="0.8">
+      <circle cx="240" cy="220" r="300" fill="#f9a8d4"/>
+      <circle cx="760" cy="500" r="330" fill="#c4b5fd"/>
+      <circle cx="380" cy="850" r="340" fill="#93c5fd"/>
+    </g>
+    <rect width="1024" height="1024" fill="url(#sheen)"/>
+  </g>
+  <rect x="12" y="12" width="1000" height="1000" rx="221" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="7"/>
+  <g filter="url(#softShadow)">
+    <g mask="url(#holesRim)" opacity="0.5">
+      <path d="M 236.3 560.6 A 280 280 0 0 1 754.5 372" fill="none" stroke="#ffffff" stroke-width="66" stroke-linecap="round"/>
+      <path d="M 787.7 463.4 A 280 280 0 0 1 269.5 652" fill="none" stroke="#ffffff" stroke-width="66" stroke-linecap="round"/>
+      <g transform="translate(754.5,372) rotate(60)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="#ffffff" stroke="#ffffff" stroke-width="40" stroke-linejoin="round"/></g>
+      <g transform="translate(269.5,652) rotate(-120)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="#ffffff" stroke="#ffffff" stroke-width="40" stroke-linejoin="round"/></g>
+      <circle cx="416.2" cy="248.9" r="72" fill="#ffffff"/>
+      <circle cx="607.8" cy="775.1" r="72" fill="#ffffff"/>
+    </g>
+    <g mask="url(#glyphMask)">
+      <g filter="url(#refrBlur)" opacity="0.6" transform="translate(14,18)">
+        <circle cx="300" cy="280" r="260" fill="#ec4899"/>
+        <circle cx="740" cy="520" r="280" fill="#a855f7"/>
+        <circle cx="430" cy="820" r="280" fill="#60a5fa"/>
+      </g>
+    </g>
+    <g filter="url(#spec)">
+      <g mask="url(#holesBody)">
+        <path d="M 236.3 560.6 A 280 280 0 0 1 754.5 372" fill="none" stroke="url(#glass)" stroke-width="58" stroke-linecap="round"/>
+        <path d="M 787.7 463.4 A 280 280 0 0 1 269.5 652" fill="none" stroke="url(#glass)" stroke-width="58" stroke-linecap="round"/>
+        <g transform="translate(754.5,372) rotate(60)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="url(#glass)" stroke="url(#glass)" stroke-width="26" stroke-linejoin="round"/></g>
+        <g transform="translate(269.5,652) rotate(-120)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="url(#glass)" stroke="url(#glass)" stroke-width="26" stroke-linejoin="round"/></g>
+        <circle cx="416.2" cy="248.9" r="68" fill="url(#glass)"/>
+        <circle cx="607.8" cy="775.1" r="68" fill="url(#glass)"/>
+      </g>
+    </g>
+    <path d="M 229 436.2 A 293 293 0 0 1 436.2 229" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="10" stroke-linecap="round"/>
+    <path d="M 795 587.8 A 293 293 0 0 1 680.1 752" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="8" stroke-linecap="round"/>
+    <path d="M 367.3 231.1 A 52 52 0 0 1 434 200" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="7" stroke-linecap="round"/>
+    <path d="M 558.9 757.3 A 52 52 0 0 1 625.6 726.2" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="7" stroke-linecap="round"/>
+  </g>
+</svg>

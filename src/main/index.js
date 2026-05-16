@@ -1,0 +1,1211 @@
+const { app, BrowserWindow, Menu, ipcMain, dialog, nativeImage } = require('electron');
+
+const path = require('node:path');
+const fs = require('node:fs/promises');
+const { execFile, spawn } = require('node:child_process');
+const { promisify } = require('node:util');
+
+function installApplicationMenu() {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    {
+      role: 'editMenu',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]));
+}
+
+const execFileP = promisify(execFile);
+
+function gitEnv() {
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
+
+function trimGitText(text) {
+  return String(text || '').trim();
+}
+
+function combinedGitOutput(stdout, stderr) {
+  return [trimGitText(stderr), trimGitText(stdout)].filter(Boolean).join('\n');
+}
+
+function defaultGitErrorSummary(command) {
+  switch (command) {
+    case 'fetch':
+      return 'Fetch failed.';
+    case 'pull':
+      return 'Pull failed.';
+    case 'push':
+      return 'Push failed.';
+    case 'commit':
+      return 'Commit failed.';
+    case 'checkout':
+      return 'Branch switch failed.';
+    case 'status':
+      return 'Git status failed.';
+    case 'add':
+      return 'Staging changes failed.';
+    default:
+      return 'Git command failed.';
+  }
+}
+
+function classifyGitFailure(args, stdout, stderr) {
+  const command = args[0] || 'git';
+  const raw = combinedGitOutput(stdout, stderr);
+  const normalized = raw.toLowerCase();
+  const has = (...patterns) => patterns.some((pattern) => normalized.includes(pattern));
+
+  if (
+    has(
+      'terminal prompts disabled',
+      'could not read username',
+      'could not read password',
+      'authentication failed',
+      'permission denied (publickey)',
+      'permission denied (publickey,password)',
+      'repository not found'
+    )
+  ) {
+    return {
+      summary: 'Authentication failed. Git needed credentials, but this app cannot answer interactive prompts.',
+      raw,
+    };
+  }
+
+  if (
+    has(
+      'could not resolve host',
+      'failed to connect',
+      'connection timed out',
+      'operation timed out',
+      'network is unreachable',
+      'connection refused',
+      'connection reset',
+      'unable to access'
+    )
+  ) {
+    return {
+      summary: 'Could not reach the remote repository. Check your network, VPN, or remote URL.',
+      raw,
+    };
+  }
+
+  if (command === 'push' && has('has no upstream branch', 'no upstream branch')) {
+    return {
+      summary: 'No upstream branch is set for this branch.',
+      raw,
+    };
+  }
+
+  if (
+    command === 'push' &&
+    has(
+      'non-fast-forward',
+      'fetch first',
+      'failed to push some refs',
+      '[rejected]'
+    )
+  ) {
+    return {
+      summary: 'Push was rejected because the remote has newer commits.',
+      raw,
+    };
+  }
+
+  if (
+    command === 'pull' &&
+    has(
+      'automatic merge failed',
+      'merge conflict',
+      'fix conflicts and then commit the result',
+      'you have unmerged paths'
+    )
+  ) {
+    return {
+      summary: 'Pull stopped because Git found merge conflicts that need manual resolution.',
+      raw,
+    };
+  }
+
+  if (
+    (command === 'pull' || command === 'push') &&
+    has('there is no tracking information', 'no upstream configured for branch')
+  ) {
+    return {
+      summary: 'No upstream branch is configured for the current branch.',
+      raw,
+    };
+  }
+
+  if (command === 'commit' && has('nothing to commit', 'no changes added to commit')) {
+    return {
+      summary: 'Nothing to commit.',
+      raw,
+    };
+  }
+
+  if (command === 'checkout' && has('pathspec', 'did not match any file')) {
+    return {
+      summary: 'That branch could not be found locally.',
+      raw,
+    };
+  }
+
+  if (has('not a git repository')) {
+    return {
+      summary: 'This folder is not currently a Git repository.',
+      raw,
+    };
+  }
+
+  if (has('couldn\'t find remote ref', 'remote ref does not exist')) {
+    return {
+      summary: 'The requested remote branch or ref does not exist.',
+      raw,
+    };
+  }
+
+  return {
+    summary: defaultGitErrorSummary(command),
+    raw,
+  };
+}
+
+function finalizeGitResult(args, result) {
+  if (result.ok) return result;
+  const failure = classifyGitFailure(args, result.stdout, result.stderr);
+  return {
+    ...result,
+    errorSummary: failure.summary,
+    errorRaw: failure.raw,
+  };
+}
+
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+async function createWindow() {
+  const config = await loadConfig();
+  const saved = config.window || {};
+  const isMac = process.platform === 'darwin';
+
+  const win = new BrowserWindow({
+    width:  saved.width  || 820,
+    height: saved.height || 500,
+    ...(saved.x != null && saved.y != null ? { x: saved.x, y: saved.y } : {}),
+    frame: false,
+    ...(!isMac ? { titleBarStyle: 'hidden' } : {}),
+    ...(!isMac && !app.isPackaged ? { icon: path.join(app.getAppPath(), 'build/icon.png') } : {}),
+    backgroundColor: '#ede9fe',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  const saveBounds = debounce(() => {
+    if (win.isMaximized() || win.isMinimized()) return;
+    const b = win.getBounds();
+    updateConfig((cfg) => {
+      cfg.window = { width: b.width, height: b.height, x: b.x, y: b.y };
+    });
+  }, 400);
+
+  win.on('resize', saveBounds);
+  win.on('move',   saveBounds);
+
+  if (isMac) {
+    win.setWindowButtonVisibility(false);
+  }
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL);
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+}
+
+// Single-instance lock — production only so local dev reloads stay friction-free.
+if (app.isPackaged) {
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
+      const [win] = BrowserWindow.getAllWindows();
+      if (win) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+    });
+  }
+}
+
+app.whenReady().then(() => {
+  installApplicationMenu();
+  // Packaged builds get the icon from the bundle; dev runs need it set explicitly.
+  if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+    const iconPath = path.resolve(__dirname, '../../resources/icon-dock.png');
+    app.dock.setIcon(nativeImage.createFromPath(iconPath));
+  }
+  createWindow();
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+async function runGit(args, cwd) {
+  try {
+    const { stdout, stderr } = await execFileP('git', args, {
+      cwd,
+      env: gitEnv(),
+    });
+    return finalizeGitResult(args, { ok: true, stdout, stderr });
+  } catch (err) {
+    return finalizeGitResult(args, {
+      ok: false,
+      stdout: err.stdout || '',
+      stderr: err.stderr || err.message,
+    });
+  }
+}
+
+async function runGitWithInput(args, cwd, input, envOverrides = {}) {
+  return await new Promise((resolve) => {
+    const child = spawn('git', args, {
+      cwd,
+      env: { ...gitEnv(), ...envOverrides },
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (err) => {
+      resolve(finalizeGitResult(args, {
+        ok: false,
+        stdout,
+        stderr: stderr || err.message,
+      }));
+    });
+    child.on('close', (code) => {
+      resolve(finalizeGitResult(args, { ok: code === 0, stdout, stderr }));
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
+  });
+}
+
+async function runGitStreaming(args, cwd, onProgress) {
+  return await new Promise((resolve) => {
+    const child = spawn('git', args, {
+      cwd,
+      env: gitEnv(),
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      onProgress?.({ stream: 'stdout', text });
+    });
+
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      onProgress?.({ stream: 'stderr', text });
+    });
+
+    child.on('error', (err) => {
+      resolve(finalizeGitResult(args, {
+        ok: false,
+        stdout,
+        stderr: stderr || err.message,
+        liveOutput: true,
+      }));
+    });
+
+    child.on('close', (code) => {
+      resolve(finalizeGitResult(args, {
+        ok: code === 0,
+        stdout,
+        stderr,
+        liveOutput: true,
+      }));
+    });
+  });
+}
+
+async function openInFileManager(repoPath) {
+  if (process.platform === 'win32') {
+    await execFileP('explorer.exe', [repoPath]);
+    return { ok: true };
+  }
+  if (process.platform === 'darwin') {
+    await execFileP('open', [repoPath]);
+    return { ok: true };
+  }
+  await execFileP('xdg-open', [repoPath]);
+  return { ok: true };
+}
+
+async function openInTerminal(repoPath) {
+  try {
+    if (process.platform === 'win32') {
+      const child = spawn('cmd.exe', ['/c', 'start', 'cmd.exe'], {
+        cwd: repoPath, detached: true, stdio: 'ignore',
+      });
+      child.unref();
+    } else if (process.platform === 'darwin') {
+      execFile('open', ['-a', 'Terminal', repoPath]);
+    } else {
+      for (const t of ['gnome-terminal', 'konsole', 'xfce4-terminal', 'x-terminal-emulator', 'xterm']) {
+        const ch = spawn(t, [], { cwd: repoPath, detached: true, stdio: 'ignore' });
+        ch.on('error', () => {});
+        ch.unref();
+        break;
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function openWithApp(repoPath, appName, linuxCommand = null) {
+  try {
+    if (process.platform === 'darwin') {
+      await execFileP('open', ['-a', appName, repoPath]);
+      return { ok: true };
+    }
+
+    if (process.platform === 'win32') {
+      const child = spawn('cmd.exe', ['/c', 'start', '', appName, repoPath], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      return { ok: true };
+    }
+
+    if (!linuxCommand) {
+      return { ok: false, error: `${appName} is not supported on this platform` };
+    }
+
+    const child = spawn(linuxCommand, [repoPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function openProjectTarget(repoPath, target) {
+  switch (target) {
+    case 'terminal':
+      return await openInTerminal(repoPath);
+    case 'finder':
+      return await openInFileManager(repoPath);
+    case 'vscode':
+      return await openWithApp(repoPath, 'Visual Studio Code', 'code');
+    case 'sourcetree':
+      return await openWithApp(repoPath, 'Sourcetree');
+    case 'antigravity':
+      return await openWithApp(repoPath, 'Antigravity');
+    default:
+      return { ok: false, error: `Unknown open target: ${target}` };
+  }
+}
+
+function configPath() {
+  return path.join(app.getPath('userData'), 'config.json');
+}
+
+async function loadConfig() {
+  try {
+    const data = await fs.readFile(configPath(), 'utf8');
+    const parsed = JSON.parse(data);
+    return { ...parsed, projects: Array.isArray(parsed.projects) ? parsed.projects : [] };
+  } catch {
+    return { projects: [] };
+  }
+}
+
+let configMutex = Promise.resolve();
+
+function updateConfig(mutator) {
+  configMutex = configMutex.then(async () => {
+    const cfg = await loadConfig();
+    mutator(cfg);
+    await fs.writeFile(configPath(), JSON.stringify(cfg, null, 2), 'utf8');
+  });
+  return configMutex;
+}
+
+ipcMain.handle('load-config', loadConfig);
+ipcMain.handle('save-config', (_, config) => {
+  return updateConfig((cfg) => { Object.assign(cfg, config); });
+});
+
+ipcMain.handle('pick-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'multiSelections'],
+  });
+  if (result.canceled) return [];
+  return result.filePaths;
+});
+
+ipcMain.handle('get-branches', async (_, repoPath) => {
+  // Distinguish a deleted/missing folder from a folder that simply isn't a repo,
+  // so the UI can grey out and offer to remove projects whose path is gone.
+  try {
+    const st = await fs.stat(repoPath);
+    if (!st.isDirectory()) return { ok: false, error: 'Folder not found', missing: true };
+  } catch {
+    return { ok: false, error: 'Folder not found', missing: true };
+  }
+
+  const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
+  if (!check.ok) return { ok: false, error: 'Not a git repository' };
+
+  const branches = await runGit(
+    ['branch', '--list', '--format=%(refname:short)'],
+    repoPath
+  );
+  if (!branches.ok) return { ok: false, error: branches.stderr };
+
+  const current = await runGit(['branch', '--show-current'], repoPath);
+  const ahead   = await runGit(['rev-list', '--count', '@{u}..HEAD'], repoPath);
+  const behind  = await runGit(['rev-list', '--count', 'HEAD..@{u}'], repoPath);
+  const status  = await runGit(['status', '--porcelain'], repoPath);
+  const uncommitted = status.ok
+    ? status.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length
+    : 0;
+
+  return {
+    ok: true,
+    branches: branches.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
+    current:  current.stdout.trim(),
+    ahead:    ahead.ok  ? (parseInt(ahead.stdout.trim())  || 0) : null,
+    behind:   behind.ok ? (parseInt(behind.stdout.trim()) || 0) : null,
+    uncommitted,
+  };
+});
+
+ipcMain.handle('fetch', async (event, repoPath) => {
+  return await runGitStreaming(['fetch', '--prune'], repoPath, (payload) => {
+    event.sender.send('git-progress', { repoPath, ...payload });
+  });
+});
+
+ipcMain.handle('git-status', async (_, repoPath) => {
+  // Porcelain output is one line per changed file (staged, unstaged, or untracked).
+  const [res, headSubject] = await Promise.all([
+    runGit(['status', '--porcelain'], repoPath),
+    runGit(['log', '-1', '--format=%s', 'HEAD'], repoPath),
+  ]);
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: res.errorSummary || res.stderr,
+      rawError: res.errorRaw || combinedGitOutput(res.stdout, res.stderr),
+    };
+  }
+  const lines = res.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  return {
+    ok: true,
+    changedCount: lines.length,
+    changes: lines,
+    hasHead: headSubject.ok,
+    headMessage: headSubject.ok ? headSubject.stdout.trim() : '',
+  };
+});
+
+ipcMain.handle('git-commit-all', async (_, repoPath, message, amend = false) => {
+  let previousMessage = '';
+  if (amend) {
+    const [head, messageResult] = await Promise.all([
+      runGit(['rev-parse', '--verify', 'HEAD'], repoPath),
+      runGit(['log', '-1', '--format=%B', 'HEAD'], repoPath),
+    ]);
+    if (!head.ok) {
+      return {
+        ok: false,
+        errorSummary: 'There is no previous commit to amend.',
+        errorRaw: head.errorRaw,
+      };
+    }
+    if (!messageResult.ok) {
+      return {
+        ok: false,
+        errorSummary: 'Could not read the previous commit message.',
+        errorRaw: messageResult.errorRaw,
+      };
+    }
+    previousMessage = messageResult.stdout.replace(/\n+$/, '');
+  }
+  const add = await runGit(['add', '-A'], repoPath);
+  if (!add.ok) return { ok: false, stdout: add.stdout, stderr: add.stderr };
+  if (amend) {
+    const messageLines = previousMessage.split('\n');
+    messageLines[0] = message || messageLines[0] || 'Quick commit';
+    return await runGitWithInput(['commit', '--amend', '-F', '-'], repoPath, messageLines.join('\n'));
+  }
+  const args = ['commit'];
+  args.push('-m', message || 'Quick commit');
+  const commit = await runGit(args, repoPath);
+  return commit;
+});
+
+ipcMain.handle('checkout', async (_, repoPath, branch) => {
+  return await runGit(['checkout', branch], repoPath);
+});
+
+ipcMain.handle('pull', async (event, repoPath) => {
+  return await runGitStreaming(['pull'], repoPath, (payload) => {
+    event.sender.send('git-progress', { repoPath, ...payload });
+  });
+});
+
+ipcMain.handle('push', async (event, repoPath) => {
+  return await runGitStreaming(['push'], repoPath, (payload) => {
+    event.sender.send('git-progress', { repoPath, ...payload });
+  });
+});
+
+ipcMain.handle('confirm-dialog', async (e, { message, detail }) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Remove', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Remove Project',
+    message,
+    detail,
+  });
+  return response === 0;
+});
+
+// ── Commit Tool ──────────────────────────────────────────────────────────────
+// Metadata rewrites are built with commit-tree and published with one
+// compare-and-swap update-ref. Until update-ref succeeds, the current branch is
+// untouched; partially created commit objects are unreachable and harmless.
+const COMMIT_RECORD_SEP = '\x1e';
+const COMMIT_FIELD_SEP = '\x1f';
+const commitRewriteLocks = new Set();
+
+function validCommitId(value) {
+  return /^[0-9a-f]{7,40}$/i.test(String(value || ''));
+}
+
+function validIdentityValue(value) {
+  const text = String(value || '').trim();
+  return text && !/[\r\n\0]/.test(text);
+}
+
+async function readGlobalGitIdentity() {
+  const [name, email] = await Promise.all([
+    runGit(['config', '--global', '--get', 'user.name']),
+    runGit(['config', '--global', '--get', 'user.email']),
+  ]);
+  return {
+    ok: true,
+    name: name.ok ? name.stdout.trim() : '',
+    email: email.ok ? email.stdout.trim() : '',
+  };
+}
+
+async function saveGlobalGitIdentity({ name, email } = {}) {
+  name = String(name || '').trim();
+  email = String(email || '').trim();
+  if (!validIdentityValue(name) || !validIdentityValue(email)) {
+    return { ok: false, error: 'Name and email are required and must each fit on one line.' };
+  }
+
+  const previous = await readGlobalGitIdentity();
+  const setName = await runGit(['config', '--global', 'user.name', name]);
+  if (!setName.ok) {
+    return { ok: false, error: setName.errorSummary || 'Could not update the global Git name.', raw: setName.errorRaw };
+  }
+
+  const setEmail = await runGit(['config', '--global', 'user.email', email]);
+  if (!setEmail.ok) {
+    if (previous.name) await runGit(['config', '--global', 'user.name', previous.name]);
+    else await runGit(['config', '--global', '--unset-all', 'user.name']);
+    return { ok: false, error: setEmail.errorSummary || 'Could not update the global Git email.', raw: setEmail.errorRaw };
+  }
+  return { ok: true, name, email };
+}
+
+function parseCommitHistory(stdout) {
+  return String(stdout || '')
+    .split(COMMIT_RECORD_SEP)
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [sha, parentsText, authorName, authorEmail, authorDate, decorations, signature, subject] = record.split(COMMIT_FIELD_SEP);
+      const parents = String(parentsText || '').split(' ').filter(Boolean);
+      const labels = String(decorations || '').split(',').map((label) => label.trim()).filter(Boolean);
+      return {
+        sha: sha || '',
+        shortSha: String(sha || '').slice(0, 7),
+        parents,
+        authorName: authorName || '',
+        authorEmail: authorEmail || '',
+        authorDate: authorDate || '',
+        labels,
+        signature: signature || 'N',
+        subject: subject || '(no commit message)',
+        isMerge: parents.length > 1,
+      };
+    });
+}
+
+async function commitToolHistory(repoPath, requestedLimit = 100) {
+  const limit = Math.min(1000, Math.max(100, Math.trunc(Number(requestedLimit)) || 100));
+  const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
+  if (!check.ok) return { ok: false, error: 'This project is not a Git repository.' };
+
+  const [branch, status, logResult, totalResult, signingKey, signingDefault, signingFormat] = await Promise.all([
+    runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoPath),
+    runGit(['status', '--porcelain=v1', '--untracked-files=all'], repoPath),
+    runGit([
+      'log', '-n', String(limit),
+      `--pretty=format:%H${COMMIT_FIELD_SEP}%P${COMMIT_FIELD_SEP}%an${COMMIT_FIELD_SEP}%ae${COMMIT_FIELD_SEP}%aI${COMMIT_FIELD_SEP}%D${COMMIT_FIELD_SEP}%G?${COMMIT_FIELD_SEP}%s${COMMIT_RECORD_SEP}`,
+      'HEAD',
+    ], repoPath),
+    runGit(['rev-list', '--count', 'HEAD'], repoPath),
+    runGit(['config', '--get', 'user.signingkey'], repoPath),
+    runGit(['config', '--get', 'commit.gpgSign'], repoPath),
+    runGit(['config', '--get', 'gpg.format'], repoPath),
+  ]);
+
+  if (!logResult.ok) {
+    const emptyRepo = /does not have any commits|unknown revision|bad revision/i.test(logResult.errorRaw || '');
+    if (!emptyRepo) return { ok: false, error: logResult.errorSummary || 'Could not read commit history.', raw: logResult.errorRaw };
+  }
+
+  return {
+    ok: true,
+    branch: branch.ok ? branch.stdout.trim() : '',
+    detached: !branch.ok,
+    dirty: status.ok && Boolean(status.stdout.trim()),
+    changedCount: status.ok ? status.stdout.split('\n').filter(Boolean).length : 0,
+    commits: logResult.ok ? parseCommitHistory(logResult.stdout) : [],
+    totalCount: totalResult.ok ? Number.parseInt(totalResult.stdout.trim(), 10) || 0 : 0,
+    limit,
+    signing: {
+      configured: Boolean((signingKey.ok && signingKey.stdout.trim()) || (signingDefault.ok && signingDefault.stdout.trim() === 'true')),
+      key: signingKey.ok ? signingKey.stdout.trim() : '',
+      format: signingFormat.ok ? signingFormat.stdout.trim() : 'openpgp',
+    },
+  };
+}
+
+async function readCommitObject(repoPath, commit) {
+  if (!validCommitId(commit)) return { ok: false, error: 'Invalid commit ID.' };
+  const result = await runGit([
+    'show', '-s',
+    '--format=%H%x00%T%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%D%x00%G?%x00%B',
+    commit,
+  ], repoPath);
+  if (!result.ok) return { ok: false, error: result.errorSummary || 'Could not read that commit.', raw: result.errorRaw };
+
+  const fields = result.stdout.split('\0');
+  if (fields.length < 12) return { ok: false, error: 'Git returned incomplete commit metadata.' };
+  const [sha, tree, parentsText, authorName, authorEmail, authorDate, committerName, committerEmail, committerDate, decorations, signature] = fields;
+  return {
+    ok: true,
+    commit: {
+      sha,
+      shortSha: sha.slice(0, 7),
+      tree,
+      parents: parentsText.split(' ').filter(Boolean),
+      authorName,
+      authorEmail,
+      authorDate,
+      committerName,
+      committerEmail,
+      committerDate,
+      labels: decorations.split(',').map((label) => label.trim()).filter(Boolean),
+      signature: signature || 'N',
+      message: fields.slice(11).join('\0').replace(/\n$/, ''),
+    },
+  };
+}
+
+async function commitToolDetail(repoPath, commit) {
+  const detail = await readCommitObject(repoPath, commit);
+  if (!detail.ok) return detail;
+  const ancestor = await runGit(['merge-base', '--is-ancestor', detail.commit.sha, 'HEAD'], repoPath);
+  const descendants = ancestor.ok
+    ? await runGit(['rev-list', '--count', `${detail.commit.sha}..HEAD`], repoPath)
+    : null;
+  return {
+    ...detail,
+    commit: {
+      ...detail.commit,
+      isMerge: detail.commit.parents.length > 1,
+      isAncestor: ancestor.ok,
+      descendantCount: descendants?.ok ? Number.parseInt(descendants.stdout.trim(), 10) || 0 : 0,
+    },
+  };
+}
+
+async function rewriteCommitMetadata({
+  repoPath,
+  commit,
+  commits,
+  message,
+  authorMode = 'global',
+  authorDateMode = 'preserve',
+  authorDate = '',
+  committerMode = 'preserve',
+  reSign = false,
+} = {}) {
+  if (commitRewriteLocks.has(repoPath)) return { ok: false, error: 'A commit rewrite is already running for this project.' };
+  commitRewriteLocks.add(repoPath);
+  try {
+    const batchRewrite = Array.isArray(commits);
+    const requestedCommitIds = new Set(
+      (batchRewrite ? commits : [commit]).map((value) => String(value || ''))
+    );
+    if (!validCommitId(commit)) return { ok: false, error: 'Select a valid commit first.' };
+    if (!requestedCommitIds.size || [...requestedCommitIds].some((sha) => !validCommitId(sha))) {
+      return { ok: false, error: 'Select valid commits first.' };
+    }
+    if (!requestedCommitIds.has(commit)) {
+      return { ok: false, error: 'The oldest selected commit must anchor the batch rewrite.' };
+    }
+    if (!['preserve', 'global'].includes(authorMode)) return { ok: false, error: 'Invalid author option.' };
+    if (!['preserve', 'current', 'custom'].includes(authorDateMode)) return { ok: false, error: 'Invalid author date option.' };
+    if (!['preserve', 'global'].includes(committerMode)) return { ok: false, error: 'Invalid committer option.' };
+    if (batchRewrite && authorDateMode !== 'preserve') {
+      return { ok: false, error: 'Batch rewrites must preserve author dates.' };
+    }
+    if (batchRewrite && message != null) {
+      return { ok: false, error: 'Batch rewrites must preserve commit messages.' };
+    }
+    if (!batchRewrite && !String(message || '').trim()) return { ok: false, error: 'The commit message cannot be empty.' };
+
+    const [identity, status, branchRef, oldHeadResult, targetResult] = await Promise.all([
+      readGlobalGitIdentity(),
+      runGit(['status', '--porcelain=v1', '--untracked-files=all'], repoPath),
+      runGit(['symbolic-ref', '--quiet', 'HEAD'], repoPath),
+      runGit(['rev-parse', 'HEAD'], repoPath),
+      readCommitObject(repoPath, commit),
+    ]);
+    if ((authorMode === 'global' || committerMode === 'global') && (!identity.name || !identity.email)) {
+      return { ok: false, error: 'Save a global Git name and email before using the global identity.' };
+    }
+    if (!status.ok) return { ok: false, error: status.errorSummary || 'Could not inspect the working tree.', raw: status.errorRaw };
+    if (status.stdout.trim()) return { ok: false, error: 'This project has uncommitted changes. Commit or stash them before rewriting history.' };
+    if (!branchRef.ok) return { ok: false, error: 'Commit rewriting requires a checked-out local branch; detached HEAD is not supported.' };
+    if (!oldHeadResult.ok) return { ok: false, error: oldHeadResult.errorSummary || 'Could not read the current branch tip.', raw: oldHeadResult.errorRaw };
+    if (!targetResult.ok) return targetResult;
+
+    const oldHead = oldHeadResult.stdout.trim();
+    const target = targetResult.commit;
+    if (target.parents.length > 1) return { ok: false, error: 'Merge commits are not supported by the Commit Tool.' };
+
+    const ancestor = await runGit(['merge-base', '--is-ancestor', target.sha, oldHead], repoPath);
+    if (!ancestor.ok) return { ok: false, error: 'The selected commit is not an ancestor of the current branch.' };
+
+    let chainShas;
+    if (target.parents.length === 0) {
+      const descendants = await runGit(['rev-list', '--reverse', '--ancestry-path', `${target.sha}..${oldHead}`], repoPath);
+      if (!descendants.ok) return { ok: false, error: descendants.errorSummary || 'Could not inspect descendant commits.', raw: descendants.errorRaw };
+      chainShas = [target.sha, ...descendants.stdout.split('\n').map((sha) => sha.trim()).filter(Boolean)];
+    } else {
+      const chain = await runGit(['rev-list', '--reverse', '--ancestry-path', `${target.sha}^..${oldHead}`], repoPath);
+      if (!chain.ok) return { ok: false, error: chain.errorSummary || 'Could not inspect descendant commits.', raw: chain.errorRaw };
+      chainShas = chain.stdout.split('\n').map((sha) => sha.trim()).filter(Boolean);
+    }
+    if (chainShas[0] !== target.sha || chainShas.at(-1) !== oldHead) {
+      return { ok: false, error: 'The selected commit does not have a single rewrite path to the current branch.' };
+    }
+
+    const metadataResults = await Promise.all(chainShas.map((sha) => readCommitObject(repoPath, sha)));
+    const failedRead = metadataResults.find((result) => !result.ok);
+    if (failedRead) return failedRead;
+    const selectedCommitIds = new Set();
+    for (const requested of requestedCommitIds) {
+      const matches = chainShas.filter((sha) => sha === requested || sha.startsWith(requested));
+      if (matches.length !== 1) {
+        return { ok: false, error: 'All selected commits must share one linear path to the current branch.' };
+      }
+      selectedCommitIds.add(matches[0]);
+    }
+    const chain = metadataResults.map((result) => result.commit);
+    for (let index = 0; index < chain.length; index += 1) {
+      const item = chain[index];
+      if (item.parents.length > 1 || (index > 0 && (item.parents.length !== 1 || item.parents[0] !== chain[index - 1].sha))) {
+        return { ok: false, error: 'This rewrite crosses a branch or merge. Only linear commit history is supported.' };
+      }
+    }
+
+    const now = new Date().toISOString();
+    let nextAuthorDate = target.authorDate;
+    if (!batchRewrite && authorDateMode === 'current') nextAuthorDate = now;
+    if (!batchRewrite && authorDateMode === 'custom') {
+      const parsedDate = new Date(authorDate);
+      if (!authorDate || Number.isNaN(parsedDate.getTime())) return { ok: false, error: 'Choose a valid custom author date.' };
+      nextAuthorDate = parsedDate.toISOString();
+    }
+
+    const currentBranchRef = branchRef.stdout.trim();
+    const currentBranch = currentBranchRef.replace(/^refs\/heads\//, '');
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 17);
+    const safeBranch = currentBranch.replace(/[^a-zA-Z0-9._-]/g, '-');
+    let backupBranch = '';
+    let backupResult = null;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const suffix = attempt ? `-${attempt}` : '';
+      backupBranch = `pcs-backup-${safeBranch}-${timestamp}${suffix}`;
+      backupResult = await runGit(['branch', backupBranch, oldHead], repoPath);
+      if (backupResult.ok) break;
+      if (!/already exists/i.test(backupResult.errorRaw || '')) break;
+    }
+    if (!backupResult?.ok) {
+      return { ok: false, error: 'Could not create the temporary backup branch. The rewrite was not started.', raw: backupResult?.errorRaw };
+    }
+
+    let branchMoved = false;
+    let newHead = null;
+    const operationResult = await (async () => {
+      let newParent = target.parents[0] || null;
+      const rewritten = [];
+      for (let index = 0; index < chain.length; index += 1) {
+        const original = chain[index];
+        const selected = selectedCommitIds.has(original.sha);
+        const selectedSingleCommit = !batchRewrite && index === 0;
+        const useGlobalAuthor = selected && authorMode === 'global';
+        const useGlobalCommitter = selected && committerMode === 'global';
+        const env = {
+          GIT_AUTHOR_NAME: useGlobalAuthor ? identity.name : original.authorName,
+          GIT_AUTHOR_EMAIL: useGlobalAuthor ? identity.email : original.authorEmail,
+          GIT_AUTHOR_DATE: selectedSingleCommit ? nextAuthorDate : original.authorDate,
+          GIT_COMMITTER_NAME: useGlobalCommitter ? identity.name : original.committerName,
+          GIT_COMMITTER_EMAIL: useGlobalCommitter ? identity.email : original.committerEmail,
+          GIT_COMMITTER_DATE: useGlobalCommitter ? now : original.committerDate,
+        };
+        const args = ['commit-tree'];
+        if (reSign) args.push('-S');
+        args.push(original.tree);
+        if (newParent) args.push('-p', newParent);
+        const created = await runGitWithInput(args, repoPath, selectedSingleCommit ? message : original.message, env);
+        if (!created.ok) {
+          const signingHint = reSign ? ' Git could not sign the rewritten commit; check your signing key and agent.' : '';
+          return { ok: false, error: `${created.errorSummary || 'Could not create the rewritten commit.'}${signingHint}`, raw: created.errorRaw };
+        }
+        const newSha = created.stdout.trim();
+        rewritten.push({ oldSha: original.sha, newSha });
+        newParent = newSha;
+      }
+
+      newHead = rewritten.at(-1).newSha;
+      const moved = await runGit(['update-ref', '-m', `commit-tool: rewrite ${target.shortSha}`, currentBranchRef, newHead, oldHead], repoPath);
+      if (!moved.ok) return { ok: false, error: moved.errorSummary || 'The branch changed before the rewrite could be applied.', raw: moved.errorRaw };
+      branchMoved = true;
+
+      const [verifiedRef, verifiedTree, verifiedStatus] = await Promise.all([
+        runGit(['rev-parse', currentBranchRef], repoPath),
+        runGit(['rev-parse', `${newHead}^{tree}`], repoPath),
+        runGit(['status', '--porcelain=v1', '--untracked-files=all'], repoPath),
+      ]);
+      const verificationPassed = verifiedRef.ok
+        && verifiedRef.stdout.trim() === newHead
+        && verifiedTree.ok
+        && verifiedTree.stdout.trim() === chain.at(-1).tree
+        && verifiedStatus.ok
+        && !verifiedStatus.stdout.trim();
+      if (!verificationPassed) {
+        return {
+          ok: false,
+          error: 'Post-rewrite verification failed. The app will restore the original branch tip.',
+          raw: [verifiedRef.errorRaw, verifiedTree.errorRaw, verifiedStatus.errorRaw].filter(Boolean).join('\n'),
+        };
+      }
+
+      return {
+        ok: true,
+        branch: currentBranch,
+        oldHead,
+        newHead,
+        oldCommit: target.sha,
+        newCommit: rewritten[0].newSha,
+        selectedCount: selectedCommitIds.size,
+        rewrittenCount: rewritten.length,
+      };
+    })();
+
+    let rolledBack = false;
+    if (!operationResult.ok && branchMoved) {
+      const rollback = await runGit([
+        'update-ref', '-m', `commit-tool: rollback ${target.shortSha}`,
+        currentBranchRef, oldHead, newHead,
+      ], repoPath);
+      const rollbackCheck = rollback.ok ? await runGit(['rev-parse', currentBranchRef], repoPath) : rollback;
+      if (!rollback.ok || !rollbackCheck.ok || rollbackCheck.stdout.trim() !== oldHead) {
+        return {
+          ok: false,
+          error: `${operationResult.error} Automatic rollback could not be confirmed. Backup branch "${backupBranch}" was kept.`,
+          raw: [operationResult.raw, rollback.errorRaw, rollbackCheck.errorRaw].filter(Boolean).join('\n'),
+          backupBranch,
+        };
+      }
+      rolledBack = true;
+      branchMoved = false;
+    }
+
+    const removedBackup = await runGit(['branch', '-D', backupBranch], repoPath);
+    if (!removedBackup.ok) {
+      const cleanupMessage = `Temporary backup branch "${backupBranch}" could not be deleted.`;
+      if (operationResult.ok) {
+        return { ...operationResult, warning: `Rewrite succeeded. ${cleanupMessage}`, backupBranch };
+      }
+      return {
+        ...operationResult,
+        error: `${operationResult.error} ${rolledBack ? 'The original branch was restored. ' : ''}${cleanupMessage}`,
+        backupBranch,
+        rolledBack,
+      };
+    }
+    if (operationResult.ok) return operationResult;
+    return {
+      ...operationResult,
+      error: rolledBack ? `${operationResult.error} The original branch was restored.` : operationResult.error,
+      rolledBack,
+    };
+  } finally {
+    commitRewriteLocks.delete(repoPath);
+  }
+}
+
+ipcMain.handle('commit-tool-get-global-identity', () => readGlobalGitIdentity());
+ipcMain.handle('commit-tool-save-global-identity', (_, identity) => saveGlobalGitIdentity(identity));
+ipcMain.handle('commit-tool-history', (_, repoPath, limit) => commitToolHistory(repoPath, limit));
+ipcMain.handle('commit-tool-detail', (_, repoPath, commit) => commitToolDetail(repoPath, commit));
+ipcMain.handle('commit-tool-rewrite', (_, payload) => rewriteCommitMetadata(payload));
+
+// ── Cross Sync ───────────────────────────────────────────────────────────────
+// Move commits between two *independent* repos (different origins, diverged
+// branches). The trick that avoids touching either repo's remotes: git can
+// fetch straight from another repo's folder path. Each operation fetches into
+// a unique temporary ref so concurrent links sharing a target repo cannot race
+// through FETCH_HEAD. No named remote or config changes are needed.
+const CROSS_RECORD_SEP = '\x1e';
+const CROSS_FIELD_SEP = '\x1f';
+let crossTempRefCounter = 0;
+
+function parseCommitLog(stdout) {
+  return String(stdout || '')
+    .split(CROSS_RECORD_SEP)
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [sha, subject] = record.split(CROSS_FIELD_SEP);
+      return { sha: sha || '', shortSha: (sha || '').slice(0, 7), subject: subject || '' };
+    });
+}
+
+function crossDetectConflict(result) {
+  const text = `${result.stderr || ''}\n${result.stdout || ''}`.toLowerCase();
+  return /conflict|automatic merge failed|after resolving the conflicts/.test(text);
+}
+
+async function crossIsRepo(repoPath) {
+  const res = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
+  return res.ok;
+}
+
+function crossCreateTempRef() {
+  crossTempRefCounter += 1;
+  return `refs/personal-control-switch/cross-sync/${process.pid}-${Date.now()}-${crossTempRefCounter}`;
+}
+
+function crossDeleteTempRef(targetPath, ref) {
+  return runGit(['update-ref', '-d', ref], targetPath);
+}
+
+// Fetch <branch> from the source repo's folder into a unique ref in the target.
+// The caller must delete the returned ref when its operation finishes.
+async function crossFetchSourceTip(targetPath, sourcePath, sourceBranch) {
+  const ref = crossCreateTempRef();
+  const result = await runGit(
+    ['fetch', '--no-tags', sourcePath, `${sourceBranch}:${ref}`],
+    targetPath
+  );
+  if (!result.ok) {
+    await crossDeleteTempRef(targetPath, ref);
+    return result;
+  }
+  return { ...result, ref };
+}
+
+async function crossReadCommits(targetPath, range) {
+  const res = await runGit(
+    ['log', `--pretty=format:%H${CROSS_FIELD_SEP}%s${CROSS_RECORD_SEP}`, range],
+    targetPath
+  );
+  return res.ok ? parseCommitLog(res.stdout) : [];
+}
+
+// Reject dirty working trees and put the target on the branch we're about to
+// change, so merge/cherry-pick act on a known, clean state.
+async function crossPrepareTarget(targetPath, targetBranch) {
+  const dirty = await runGit(['status', '--porcelain'], targetPath);
+  if (dirty.ok && dirty.stdout.trim()) {
+    return { ok: false, error: 'The target repo has uncommitted changes. Commit or stash them first.' };
+  }
+  const checkout = await runGit(['checkout', targetBranch], targetPath);
+  if (!checkout.ok) {
+    return {
+      ok: false,
+      error: checkout.errorSummary || `Could not switch the target repo to "${targetBranch}".`,
+      raw: checkout.errorRaw,
+    };
+  }
+  return { ok: true };
+}
+
+// Read-only. Commits each side is missing relative to the other, plus whether
+// the two histories share a common ancestor.
+//   incoming = in source, not in target  (a source -> target merge)
+//   outgoing = in target, not in source  (a target -> source merge)
+async function crossCompare({ sourcePath, sourceBranch, targetPath, targetBranch }) {
+  if (!sourceBranch || !targetBranch) {
+    return { ok: false, error: 'Pick a branch on each side first.' };
+  }
+  if (!(await crossIsRepo(sourcePath)) || !(await crossIsRepo(targetPath))) {
+    return { ok: false, error: 'One of the linked folders is not a Git repository.' };
+  }
+  const fetched = await crossFetchSourceTip(targetPath, sourcePath, sourceBranch);
+  if (!fetched.ok) {
+    return { ok: false, error: fetched.errorSummary || 'Could not read the source repository.', raw: fetched.errorRaw };
+  }
+  try {
+    const incoming = await crossReadCommits(targetPath, `${targetBranch}..${fetched.ref}`);
+    const outgoing = await crossReadCommits(targetPath, `${fetched.ref}..${targetBranch}`);
+    const base = await runGit(['merge-base', targetBranch, fetched.ref], targetPath);
+    return { ok: true, related: base.ok, incoming, outgoing };
+  } finally {
+    await crossDeleteTempRef(targetPath, fetched.ref);
+  }
+}
+
+// Integrate the source branch into the target branch by rebasing the target's
+// own commits on top of the source tip — linear history, no merge commit. No
+// --allow-unrelated-histories: mismatched histories conflict and abort rather
+// than silently combining (use fetch-branch for that case instead).
+async function crossIntegrate({ sourcePath, sourceBranch, targetPath, targetBranch }) {
+  const prepared = await crossPrepareTarget(targetPath, targetBranch);
+  if (!prepared.ok) return prepared;
+  const fetched = await crossFetchSourceTip(targetPath, sourcePath, sourceBranch);
+  if (!fetched.ok) return { ok: false, error: fetched.errorSummary || 'Fetch failed.', raw: fetched.errorRaw };
+
+  try {
+    const res = await runGit(['rebase', fetched.ref], targetPath);
+    if (!res.ok && crossDetectConflict(res)) {
+      await runGit(['rebase', '--abort'], targetPath);
+      return { ok: false, conflict: true, error: 'Rebase hit conflicts and was aborted — the histories do not line up cleanly. Do it manually in a terminal, or use Fetch branch instead.' };
+    }
+    if (!res.ok) return { ok: false, error: res.errorSummary || 'Rebase failed.', raw: res.errorRaw };
+    return { ok: true, output: [res.stdout, res.stderr].filter(Boolean).join('\n').trim() };
+  } finally {
+    await crossDeleteTempRef(targetPath, fetched.ref);
+  }
+}
+
+// Fetch the source branch into the target repo as a *new local branch* (empty
+// name → same as the source branch). Only ever adds a ref — never force, never
+// touches the working tree. Errors if the name is the target's checked-out
+// branch, or already exists and would need a non-fast-forward update.
+async function crossFetchBranch({ sourcePath, sourceBranch, targetPath, name }) {
+  const branchName = (name && name.trim()) || sourceBranch;
+
+  const current = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], targetPath);
+  if (current.ok && current.stdout.trim() === branchName) {
+    return { ok: false, error: `"${branchName}" is checked out in the target repo. Pick a different name.` };
+  }
+
+  const res = await runGit(
+    ['fetch', '--no-tags', sourcePath, `${sourceBranch}:refs/heads/${branchName}`],
+    targetPath
+  );
+  if (!res.ok) {
+    const text = `${res.stderr || ''}\n${res.stdout || ''}`.toLowerCase();
+    if (text.includes('non-fast-forward') || text.includes('rejected')) {
+      return { ok: false, error: `A branch named "${branchName}" already exists in the target and has diverged. Pick a new name.` };
+    }
+    if (text.includes('checked out')) {
+      return { ok: false, error: `"${branchName}" is checked out in the target repo. Pick a different name.` };
+    }
+    return { ok: false, error: res.errorSummary || 'Fetch branch failed.', raw: res.errorRaw };
+  }
+  return { ok: true, name: branchName };
+}
+
+ipcMain.handle('cross-compare', (_, payload) => crossCompare(payload));
+ipcMain.handle('cross-integrate', (_, payload) => crossIntegrate(payload));
+ipcMain.handle('cross-fetch-branch', (_, payload) => crossFetchBranch(payload));
+
+ipcMain.handle('get-platform', () => process.platform);
+ipcMain.handle('get-homedir', () => require('node:os').homedir());
+
+ipcMain.handle('open-terminal', (_, repoPath) => {
+  return openInTerminal(repoPath);
+});
+
+ipcMain.handle('open-with', async (_, repoPath, target) => {
+  return await openProjectTarget(repoPath, target);
+});
+
+ipcMain.handle('window-minimize', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.minimize();
+});
+
+ipcMain.handle('window-maximize', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w) return;
+  if (w.isMaximized()) w.unmaximize();
+  else w.maximize();
+});
+
+ipcMain.handle('window-close', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.close();
+});

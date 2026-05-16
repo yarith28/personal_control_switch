@@ -1,0 +1,57 @@
+{
+  "name": "personal_control_switch",
+  "version": "1.0.0",
+  "description": "",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite dev",
+    "preview": "electron-vite preview",
+    "build:bundle": "electron-vite build",
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build": "electron-vite build && electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "lucide": "^1.16.0",
+    "vite": "^7.3.3"
+  },
+  "build": {
+    "appId": "com.personal.git-sync",
+    "productName": "Git Sync",
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "icon": "resources/icon.icon",
+      "target": "dmg",
+      "identity": null,
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}

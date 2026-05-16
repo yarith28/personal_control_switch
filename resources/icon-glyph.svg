@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="glyphGrad" gradientUnits="userSpaceOnUse" x1="236" y1="249" x2="788" y2="775">
+      <stop offset="0" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#ec4899"/>
+    </linearGradient>
+    <mask id="holes" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="416.2" cy="248.9" r="30" fill="#000"/>
+      <circle cx="607.8" cy="775.1" r="30" fill="#000"/>
+    </mask>
+  </defs>
+  <g mask="url(#holes)">
+    <path d="M 236.3 560.6 A 280 280 0 0 1 754.5 372" fill="none" stroke="url(#glyphGrad)" stroke-width="58" stroke-linecap="round"/>
+    <path d="M 787.7 463.4 A 280 280 0 0 1 269.5 652" fill="none" stroke="url(#glyphGrad)" stroke-width="58" stroke-linecap="round"/>
+    <g transform="translate(754.5,372) rotate(60)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="url(#glyphGrad)" stroke="url(#glyphGrad)" stroke-width="26" stroke-linejoin="round"/></g>
+    <g transform="translate(269.5,652) rotate(-120)"><path d="M -14 -52 L 56 0 L -14 52 Z" fill="url(#glyphGrad)" stroke="url(#glyphGrad)" stroke-width="26" stroke-linejoin="round"/></g>
+    <circle cx="416.2" cy="248.9" r="68" fill="url(#glyphGrad)"/>
+    <circle cx="607.8" cy="775.1" r="68" fill="url(#glyphGrad)"/>
+  </g>
+</svg>
