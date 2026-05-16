@@ -28,17 +28,14 @@
       "styles.css"
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "dir", "arch": ["x64"] }
+      ]
     },
     "mac": {
       "target": "dmg",
       "category": "public.app-category.developer-tools"
-    },
-    "nsis": {
-      "oneClick": true,
-      "installerLanguages": ["en_US"],
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
     }
   }
 }
