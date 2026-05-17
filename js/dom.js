@@ -1,0 +1,11 @@
+export const addBtn = document.getElementById('add-project');
+export const selectAll = document.getElementById('select-all');
+export const pullSelectedBtn = document.getElementById('pull-selected');
+export const pushSelectedBtn = document.getElementById('push-selected');
+export const projectsEl = document.getElementById('projects');
+export const output = document.getElementById('output');
+export const multiSelectBtn = document.getElementById('multi-select-btn');
+export const organizeBtn = document.getElementById('organize-btn');
+export const addFolderBtn = document.getElementById('add-folder-btn');
+export const container = document.querySelector('.container');
+export const refreshBtn = document.getElementById('refresh-btn');

@@ -34,17 +34,34 @@
 
       <div class="toolbar">
         <button id="add-project" class="btn btn-primary">+ Add project</button>
-        <label class="select-all">
+        <button id="multi-select-btn" class="btn-select-toggle">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="3" x2="12" y2="3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="8" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          Batch
+        </button>
+        <button id="organize-btn" class="btn-select-toggle">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M9 1.5L11.5 4L5 10.5L1.5 11.5L2.5 8L9 1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Edit
+        </button>
+        <button id="refresh-btn" class="btn-select-toggle">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M11 6.5A4.5 4.5 0 1 1 6.5 2c1.3 0 2.47.55 3.3 1.43" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M9.5 1v2.5H12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div class="edit-bar" id="edit-bar">
+        <button id="add-folder-btn" class="btn btn-primary">+ Folder</button>
+      </div>
+      <div class="select-bar" id="select-bar">
+        <label class="select-all" id="select-all-label">
           <input type="checkbox" id="select-all" />
-          <span>Select all</span>
+          <span class="checkbox-box">
+            <svg class="checkbox-check" width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1.5 4L3.5 6.5L8.5 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="checkbox-dash" width="8" height="2" viewBox="0 0 8 2" fill="none"><line x1="0" y1="1" x2="8" y2="1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </span>
+          <span>All</span>
         </label>
         <div class="spacer"></div>
-        <button id="pull-selected" class="btn btn-pull" disabled>
-          Pull selected
-        </button>
-        <button id="push-selected" class="btn btn-push" disabled>
-          Push selected
-        </button>
+        <button id="pull-selected" class="btn btn-pull" disabled>Pull selected</button>
+        <button id="push-selected" class="btn btn-push" disabled>Push selected</button>
       </div>
 
       <div id="projects" class="projects">
@@ -71,6 +88,6 @@
         <pre id="output" class="output"></pre>
       </div>
     </div>
-    <script src="renderer.js"></script>
+    <script type="module" src="renderer.js"></script>
   </body>
 </html>
