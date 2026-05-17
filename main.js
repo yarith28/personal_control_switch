@@ -172,6 +172,7 @@ ipcMain.handle('confirm-dialog', async (e, { message, detail }) => {
 });
 
 ipcMain.handle('get-platform', () => process.platform);
+ipcMain.handle('get-homedir', () => require('node:os').homedir());
 
 ipcMain.handle('open-terminal', (_, repoPath) => {
   try {

@@ -2,6 +2,8 @@ import { state, findFolderById, findProjectByPath, findLocation, removeItem } fr
 import { projectsEl } from './dom.js';
 import { persist } from './persist.js';
 import { renderProjects } from './render-list.js';
+import { updateBatchButtons } from './actions.js';
+import { confirmDialog } from './modal.js';
 
 export async function addFolder() {
   const id = 'f' + Date.now();
@@ -48,12 +50,48 @@ export function renderFolderHeader(folder) {
   const el = document.createElement('div');
   el.className = 'group-header' + (folder.collapsed && !state.organizeMode ? ' collapsed' : '');
   el.dataset.id = folder.id;
+  if (folder.color) el.style.setProperty('--folder-color', folder.color);
 
   // drag handle
   const handle = document.createElement('div');
   handle.className = 'drag-handle';
   handle.innerHTML = `<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="4" cy="3" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>`;
   handle.addEventListener('mousedown', () => { if (state.organizeMode) el.draggable = true; });
+
+  // batch-select checkbox (visible only in multi-select mode)
+  const checkboxLabel = document.createElement('label');
+  checkboxLabel.className = 'checkbox-wrap';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'select';
+  checkboxLabel.appendChild(checkbox);
+  checkboxLabel.insertAdjacentHTML('beforeend',
+    `<span class="checkbox-box">
+      <svg class="checkbox-check" width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1.5 4L3.5 6.5L8.5 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="checkbox-dash" width="8" height="2" viewBox="0 0 8 2" fill="none"><line x1="0" y1="1" x2="8" y2="1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </span>`
+  );
+  const selectable = folder.items.filter((p) => p.branches);
+  checkbox.disabled = selectable.length === 0;
+  checkbox.checked = selectable.length > 0 && selectable.every((p) => p.selected);
+  checkbox.indeterminate = !checkbox.checked && selectable.some((p) => p.selected);
+  checkboxLabel.addEventListener('click', (e) => e.stopPropagation());
+  checkbox.addEventListener('change', () => {
+    const checked = checkbox.checked;
+    for (const p of folder.items) {
+      if (p.branches) p.selected = checked;
+    }
+    let sib = el.nextElementSibling;
+    while (sib && sib.classList.contains('group-member')) {
+      const child = folder.items.find((p) => p.path === sib.dataset.path);
+      if (child) {
+        const cb = sib.querySelector('.select');
+        if (cb && !cb.disabled) cb.checked = child.selected;
+      }
+      sib = sib.nextElementSibling;
+    }
+    updateBatchButtons();
+  });
 
   // folder icon
   const icon = document.createElement('span');
@@ -68,6 +106,7 @@ export function renderFolderHeader(folder) {
   nameEl.className = 'group-name';
   nameEl.textContent = folder.name;
   nameEl.addEventListener('dblclick', (e) => {
+    if (!state.organizeMode) return;
     e.stopPropagation();
     startRename(nameEl);
   });
@@ -77,12 +116,69 @@ export function renderFolderHeader(folder) {
   count.className = 'folder-count';
   count.textContent = folder.items.length > 0 ? folder.items.length : '';
 
+  // color marker (edit mode only)
+  const colorBtn = document.createElement('button');
+  colorBtn.className = 'folder-color-btn';
+  colorBtn.title = 'Folder color';
+  if (folder.color) colorBtn.style.backgroundColor = folder.color;
+  else colorBtn.classList.add('no-color');
+
+  const colorPalette = document.createElement('div');
+  colorPalette.className = 'color-palette-dropdown';
+  document.body.appendChild(colorPalette);
+
+  const FOLDER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
+
+  const setColor = async (color) => {
+    colorPalette.classList.remove('open');
+    folder.color = color;
+    await persist();
+    renderProjects();
+  };
+
+  colorBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open, .color-palette-dropdown.open')
+      .forEach((d) => d.classList.remove('open'));
+    colorPalette.innerHTML = '';
+    const none = document.createElement('div');
+    none.className = 'color-option color-option-none';
+    none.title = 'No color';
+    none.addEventListener('click', (ev) => { ev.stopPropagation(); setColor(null); });
+    colorPalette.appendChild(none);
+    for (const c of FOLDER_COLORS) {
+      const opt = document.createElement('div');
+      opt.className = 'color-option';
+      opt.style.backgroundColor = c;
+      if (folder.color === c) opt.classList.add('active');
+      opt.addEventListener('click', (ev) => { ev.stopPropagation(); setColor(c); });
+      colorPalette.appendChild(opt);
+    }
+    const rect = colorBtn.getBoundingClientRect();
+    colorPalette.style.top = (rect.bottom + 6) + 'px';
+    colorPalette.style.left = '0px';
+    colorPalette.classList.add('open');
+    const width = colorPalette.offsetWidth;
+    let left = rect.right - width;
+    if (left < 8) left = 8;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    colorPalette.style.left = left + 'px';
+  });
+
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'group-delete';
   deleteBtn.title = 'Remove folder (projects move to top level)';
   deleteBtn.innerHTML = '×';
   deleteBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
+    const n = folder.items.length;
+    const confirmed = await confirmDialog({
+      message: `Remove folder "${folder.name}"?`,
+      detail: n === 0
+        ? 'This folder is empty.'
+        : `${n} project${n === 1 ? '' : 's'} will move to the top level.`,
+    });
+    if (!confirmed) return;
     // Promote children to top-level at the folder's position
     const idx = state.items.indexOf(folder);
     if (idx !== -1) state.items.splice(idx, 1, ...folder.items);
@@ -91,10 +187,12 @@ export function renderFolderHeader(folder) {
   });
 
   el.appendChild(handle);
+  el.appendChild(checkboxLabel);
   el.appendChild(chevron);
   el.appendChild(icon);
   el.appendChild(nameEl);
   el.appendChild(count);
+  el.appendChild(colorBtn);
   el.appendChild(deleteBtn);
 
   // collapse toggle (normal mode only) — update in-place so the chevron transition fires

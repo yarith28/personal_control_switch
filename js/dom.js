@@ -9,3 +9,4 @@ export const organizeBtn = document.getElementById('organize-btn');
 export const addFolderBtn = document.getElementById('add-folder-btn');
 export const container = document.querySelector('.container');
 export const refreshBtn = document.getElementById('refresh-btn');
+export const collapseBtn = document.getElementById('collapse-btn');

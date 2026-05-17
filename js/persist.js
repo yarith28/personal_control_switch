@@ -12,6 +12,7 @@ export async function persist() {
             id: i.id,
             name: i.name,
             collapsed: i.collapsed,
+            color: i.color || null,
             items: i.items.map((p) => ({ type: 'project', path: p.path })),
           }
         : { type: 'project', path: i.path }

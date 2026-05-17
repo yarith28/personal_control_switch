@@ -1,7 +1,7 @@
 import './js/log.js'; // registers error/unhandledrejection handlers
 import {
   addBtn, selectAll, pullSelectedBtn, pushSelectedBtn,
-  multiSelectBtn, organizeBtn, addFolderBtn, refreshBtn,
+  multiSelectBtn, organizeBtn, addFolderBtn, refreshBtn, collapseBtn,
 } from './js/dom.js';
 import { state, getProjects } from './js/state.js';
 import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
@@ -30,6 +30,13 @@ selectAll.addEventListener('change', () => {
 multiSelectBtn.addEventListener('click', () => setMultiSelect(!state.multiSelect));
 organizeBtn.addEventListener('click', () => setOrganizeMode(!state.organizeMode));
 addFolderBtn.addEventListener('click', addFolder);
+collapseBtn.addEventListener('click', async () => {
+  const folders = state.items.filter((i) => i.type === 'folder');
+  const allCollapsed = folders.every((f) => f.collapsed);
+  folders.forEach((f) => { f.collapsed = !allCollapsed; });
+  renderProjects();
+  persist();
+});
 refreshBtn.addEventListener('click', async () => {
   refreshBtn.classList.add('spinning');
   refreshBtn.disabled = true;
@@ -42,6 +49,7 @@ refreshBtn.addEventListener('click', async () => {
 (async function init() {
   const platform = await window.api.getPlatform();
   document.body.classList.add('platform-' + platform);
+  state.homedir = await window.api.getHomedir();
 
   document
     .getElementById('win-min')
@@ -65,7 +73,7 @@ refreshBtn.addEventListener('click', async () => {
     themeSwatches.classList.toggle('open');
   });
   const closeAllDropdowns = () => {
-    document.querySelectorAll('.branch-dropdown.open').forEach((d) => d.classList.remove('open'));
+    document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open, .color-palette-dropdown.open').forEach((d) => d.classList.remove('open'));
     document.querySelectorAll('.branch-wrap.open').forEach((w) => w.classList.remove('open'));
   };
 
@@ -107,6 +115,7 @@ refreshBtn.addEventListener('click', async () => {
           id: entry.id,
           name: entry.name,
           collapsed: !!entry.collapsed,
+          color: entry.color || null,
           items: (entry.items || []).map((p) => ({ type: 'project', path: p.path })),
         });
       } else if (entry.type === 'project') {

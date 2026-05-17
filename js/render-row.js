@@ -1,5 +1,5 @@
 import { state, findProjectByPath, findFolderById, findLocation, removeItem } from './state.js';
-import { basename } from './util.js';
+import { basename, displayPath } from './util.js';
 import { log } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
@@ -44,7 +44,7 @@ export function renderRow(project, parentFolder = null) {
   name.textContent = basename(project.path);
   const fullPath = document.createElement('div');
   fullPath.className = 'path';
-  fullPath.textContent = project.path;
+  fullPath.textContent = '‎' + displayPath(project.path, state.homedir);
   fullPath.title = project.path;
   info.appendChild(name);
   info.appendChild(fullPath);
@@ -130,15 +130,27 @@ export function renderRow(project, parentFolder = null) {
 
   const pullBtn = document.createElement('button');
   pullBtn.className = 'btn btn-pull';
-  pullBtn.textContent = project.behind > 0 ? `Pull ↓${project.behind}` : 'Pull';
+  pullBtn.textContent = 'Pull';
   pullBtn.disabled = !project.branches;
   pullBtn.addEventListener('click', () => doPull(project, row));
+  if (project.behind > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'btn-badge';
+    badge.textContent = project.behind;
+    pullBtn.appendChild(badge);
+  }
 
   const pushBtn = document.createElement('button');
   pushBtn.className = 'btn btn-push';
-  pushBtn.textContent = project.ahead > 0 ? `Push ↑${project.ahead}` : 'Push';
+  pushBtn.textContent = 'Push';
   pushBtn.disabled = !project.branches;
   pushBtn.addEventListener('click', () => doPush(project, row));
+  if (project.ahead > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'btn-badge';
+    badge.textContent = project.ahead;
+    pushBtn.appendChild(badge);
+  }
 
   btnRow.appendChild(pullBtn);
   btnRow.appendChild(pushBtn);
@@ -154,6 +166,55 @@ export function renderRow(project, parentFolder = null) {
   termBtn.addEventListener('click', async () => {
     const res = await window.api.openTerminal(project.path);
     if (!res.ok) log(`[${basename(project.path)}] failed to open terminal: ${res.error}`);
+  });
+
+  const moveBtn = document.createElement('button');
+  moveBtn.className = 'btn-move';
+  moveBtn.title = 'Move to folder';
+  moveBtn.innerHTML = `<svg width="14" height="13" viewBox="0 0 15 13" fill="none"><path d="M1 2.5C1 1.67 1.67 1 2.5 1H5.5L7 2.5H12.5C13.33 2.5 14 3.17 14 4V10.5C14 11.33 13.33 12 12.5 12H2.5C1.67 12 1 11.33 1 10.5V2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+
+  const moveDropdown = document.createElement('div');
+  moveDropdown.className = 'move-dropdown';
+  document.body.appendChild(moveDropdown);
+
+  const doMove = async (target) => {
+    moveDropdown.classList.remove('open');
+    removeItem(project);
+    if (target === null) state.items.push(project);
+    else target.items.push(project);
+    await persist();
+    renderProjects();
+  };
+
+  moveBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open').forEach((d) => d.classList.remove('open'));
+    moveDropdown.innerHTML = '';
+    const folders = state.items.filter((i) => i.type === 'folder');
+    const options = [];
+    if (parentFolder) options.push({ label: '↑ Top level', target: null });
+    for (const f of folders) {
+      if (parentFolder && f.id === parentFolder.id) continue;
+      options.push({ label: f.name, target: f });
+    }
+    if (options.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'move-empty';
+      empty.textContent = 'No folders available';
+      moveDropdown.appendChild(empty);
+    } else {
+      for (const opt of options) {
+        const el = document.createElement('div');
+        el.className = 'move-option';
+        el.textContent = opt.label;
+        el.addEventListener('click', (ev) => { ev.stopPropagation(); doMove(opt.target); });
+        moveDropdown.appendChild(el);
+      }
+    }
+    const rect = moveBtn.getBoundingClientRect();
+    moveDropdown.style.top = (rect.bottom + 6) + 'px';
+    moveDropdown.style.left = Math.max(8, rect.right - 180) + 'px';
+    moveDropdown.classList.add('open');
   });
 
   const removeBtn = document.createElement('button');
@@ -221,6 +282,7 @@ export function renderRow(project, parentFolder = null) {
   row.appendChild(branchWrap);
   row.appendChild(btnRow);
   row.appendChild(termBtn);
+  row.appendChild(moveBtn);
   row.appendChild(removeBtn);
 
   return row;

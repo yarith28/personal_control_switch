@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   push: (repoPath) => ipcRenderer.invoke('push', repoPath),
   confirmDialog: (opts) => ipcRenderer.invoke('confirm-dialog', opts),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
+  getHomedir: () => ipcRenderer.invoke('get-homedir'),
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),

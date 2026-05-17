@@ -34,17 +34,20 @@
 
       <div class="toolbar">
         <button id="add-project" class="btn btn-primary">+ Add project</button>
-        <button id="multi-select-btn" class="btn-select-toggle">
+        <button id="multi-select-btn" class="btn-select-toggle icon-only" title="Batch select">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="3" x2="12" y2="3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="8" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-          Batch
         </button>
-        <button id="organize-btn" class="btn-select-toggle">
+        <button id="organize-btn" class="btn-select-toggle icon-only" title="Edit / organize">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M9 1.5L11.5 4L5 10.5L1.5 11.5L2.5 8L9 1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Edit
         </button>
-        <button id="refresh-btn" class="btn-select-toggle">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M11 6.5A4.5 4.5 0 1 1 6.5 2c1.3 0 2.47.55 3.3 1.43" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M9.5 1v2.5H12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Refresh
+        <button id="collapse-btn" class="btn-select-toggle icon-only" title="Collapse all folders" disabled>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <g class="icon-collapse"><path d="M3 6L6.5 2.5L10 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 10.5L6.5 7L10 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
+            <g class="icon-expand"><path d="M3 2.5L6.5 6L10 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 7L6.5 10.5L10 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
+          </svg>
+        </button>
+        <button id="refresh-btn" class="btn-select-toggle icon-only" title="Refresh">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M11 6.5A4.5 4.5 0 1 1 9.7 3.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M8.2 3.7L9.7 3.3L10.1 1.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
       <div class="edit-bar" id="edit-bar">
@@ -88,6 +91,18 @@
         <pre id="output" class="output"></pre>
       </div>
     </div>
+
+    <div class="modal-overlay" id="confirm-modal" hidden>
+      <div class="modal-card">
+        <div class="modal-message" id="modal-message"></div>
+        <div class="modal-detail" id="modal-detail"></div>
+        <div class="modal-actions">
+          <button class="btn modal-cancel" id="modal-cancel">Cancel</button>
+          <button class="btn modal-confirm" id="modal-confirm">Remove</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="renderer.js"></script>
   </body>
 </html>

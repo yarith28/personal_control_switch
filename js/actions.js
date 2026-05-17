@@ -6,6 +6,7 @@ import { persist } from './persist.js';
 import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
 import { setRowBusy } from './render-row.js';
+import { confirmDialog } from './modal.js';
 
 export function updateBatchButtons() {
   const projects = getProjects();
@@ -18,6 +19,19 @@ export function updateBatchButtons() {
     selectable.length > 0 && selectable.every((p) => p.selected);
   selectAll.indeterminate =
     !selectAll.checked && selectable.some((p) => p.selected);
+
+  // sync per-folder checkboxes
+  for (const item of state.items) {
+    if (item.type !== 'folder') continue;
+    const header = projectsEl.querySelector(`.group-header[data-id="${item.id}"]`);
+    if (!header) continue;
+    const cb = header.querySelector('.select');
+    if (!cb) continue;
+    const sel = item.items.filter((p) => p.branches);
+    cb.disabled = sel.length === 0;
+    cb.checked = sel.length > 0 && sel.every((p) => p.selected);
+    cb.indeterminate = !cb.checked && sel.some((p) => p.selected);
+  }
 }
 
 export async function doPull(project, row) {
@@ -63,7 +77,7 @@ export async function addProject() {
 
 export async function removeProject(project) {
   const name = basename(project.path);
-  const confirmed = await window.api.confirmDialog({
+  const confirmed = await confirmDialog({
     message: `Remove "${name}"?`,
     detail: 'This removes it from the list. Your files are not deleted.',
   });
