@@ -137,6 +137,10 @@ ipcMain.handle('get-branches', async (_, repoPath) => {
   const current = await runGit(['branch', '--show-current'], repoPath);
   const ahead   = await runGit(['rev-list', '--count', '@{u}..HEAD'], repoPath);
   const behind  = await runGit(['rev-list', '--count', 'HEAD..@{u}'], repoPath);
+  const status  = await runGit(['status', '--porcelain'], repoPath);
+  const uncommitted = status.ok
+    ? status.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length
+    : 0;
 
   return {
     ok: true,
@@ -144,11 +148,27 @@ ipcMain.handle('get-branches', async (_, repoPath) => {
     current:  current.stdout.trim(),
     ahead:    ahead.ok  ? (parseInt(ahead.stdout.trim())  || 0) : null,
     behind:   behind.ok ? (parseInt(behind.stdout.trim()) || 0) : null,
+    uncommitted,
   };
 });
 
 ipcMain.handle('fetch', async (_, repoPath) => {
   return await runGit(['fetch', '--prune'], repoPath);
+});
+
+ipcMain.handle('git-status', async (_, repoPath) => {
+  // Porcelain output is one line per changed file (staged, unstaged, or untracked).
+  const res = await runGit(['status', '--porcelain'], repoPath);
+  if (!res.ok) return { ok: false, error: res.stderr };
+  const lines = res.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  return { ok: true, changedCount: lines.length, changes: lines };
+});
+
+ipcMain.handle('git-commit-all', async (_, repoPath, message) => {
+  const add = await runGit(['add', '-A'], repoPath);
+  if (!add.ok) return { ok: false, stdout: add.stdout, stderr: add.stderr };
+  const commit = await runGit(['commit', '-m', message || 'Quick commit'], repoPath);
+  return commit;
 });
 
 ipcMain.handle('checkout', async (_, repoPath, branch) => {

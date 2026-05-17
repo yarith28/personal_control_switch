@@ -48,8 +48,26 @@
 }
 .modal-cancel { background: var(--glass-bg); color: var(--text-muted); }
 .modal-cancel:hover:not(:disabled) { background: var(--glass-bg-hover); color: var(--text-primary); }
+.modal-confirm { background: rgba(168, 85, 247, 0.7); color: white; }
+.modal-confirm:hover:not(:disabled) { background: rgba(168, 85, 247, 0.88); }
 .modal-confirm.danger { background: rgba(220, 38, 38, 0.78); color: white; }
 .modal-confirm.danger:hover:not(:disabled) { background: rgba(220, 38, 38, 0.95); }
+
+.modal-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 12px;
+  margin-bottom: 18px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.modal-input:focus { border-color: var(--branch-color); background: var(--glass-bg-hover); }
+.modal-input[hidden] { display: none; }
 
 :root {
   --bg-gradient: linear-gradient(135deg, #fce7f3 0%, #ede9fe 50%, #dbeafe 100%);
@@ -334,6 +352,7 @@ input[type='checkbox']:disabled + .checkbox-box {
 .btn-fetch   { background: rgba(148, 163, 184, 0.7); color: white; }
 .btn-pull    { background: rgba(16, 185, 129, 0.65); color: white; }
 .btn-push    { background: rgba(59, 130, 246, 0.65); color: white; }
+.btn-commit  { background: rgba(245, 158, 11, 0.7); color: white; }
 
 /* project list */
 .projects {
@@ -578,6 +597,12 @@ input[type='checkbox']:disabled + .checkbox-box {
 .project-row.busy:hover { background: var(--glass-bg); }
 
 .project-row .info { flex: 1; min-width: 0; }
+.project-row .name-text { cursor: pointer; transition: color 0.14s ease; }
+.project-row .name-text:hover { color: var(--branch-color); }
+.container.organize-mode .project-row .name-text,
+.container.multi-select .project-row .name-text { cursor: default; }
+.container.organize-mode .project-row .name-text:hover,
+.container.multi-select .project-row .name-text:hover { color: inherit; }
 .project-row .name {
   font-size: 14px;
   font-weight: 600;
@@ -599,24 +624,26 @@ input[type='checkbox']:disabled + .checkbox-box {
 }
 
 .branch-wrap {
+  width: 28px;
+  height: 28px;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 9px 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: var(--branch-bg);
-  color: var(--branch-color);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
-  min-width: 0;
-  max-width: 230px;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(168, 85, 247, 0.65);
+  color: white;
+  box-shadow: inset 0 1.5px 0 rgba(255,255,255,0.5), 0 3px 10px rgba(0,0,0,0.08);
+  flex-shrink: 0;
   cursor: pointer;
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.14s ease, transform 0.12s ease, box-shadow 0.12s ease;
   -webkit-app-region: no-drag;
 }
 .branch-wrap:hover:not(.disabled):not(.busy) {
-  background: rgba(168, 85, 247, 0.2);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 8px rgba(168,85,247,0.12);
+  background: rgba(168, 85, 247, 0.82);
+  transform: translateY(-1px);
+  box-shadow: inset 0 1.5px 0 rgba(255,255,255,0.5), 0 6px 18px rgba(0,0,0,0.12);
 }
 .branch-wrap.disabled,
 .branch-wrap.busy { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
@@ -676,7 +703,7 @@ input[type='checkbox']:disabled + .checkbox-box {
 .project-row .btn-row { display: flex; gap: 6px; }
 .project-row .btn-pull,
 .project-row .btn-push,
-.project-row .btn-fetch {
+.project-row .btn-commit {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -703,6 +730,18 @@ input[type='checkbox']:disabled + .checkbox-box {
   background: white;
   color: var(--bg-base, #1a0a2e);
   box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  pointer-events: none;
+}
+
+.btn-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   pointer-events: none;
 }
 
@@ -921,7 +960,7 @@ input[type='checkbox']:disabled + .checkbox-box {
 .toggle-switch.active { background: var(--branch-color); }
 .toggle-switch.active::after { transform: translateX(16px); }
 
-/* Inline branch chip next to project name — shown in both modes */
+/* Inline branch chip next to project name — also the switch-branch trigger */
 .name-branch {
   display: inline-block;
   margin-left: 8px;
@@ -933,13 +972,18 @@ input[type='checkbox']:disabled + .checkbox-box {
   border-radius: 999px;
   vertical-align: middle;
   line-height: 1.4;
+  transition: background 0.14s ease;
 }
 .name-branch:empty { display: none; }
+.name-branch.clickable { cursor: pointer; }
+.name-branch.clickable:hover { background: rgba(168, 85, 247, 0.22); }
+
+/* Branch text is never shown inside the chip — the inline chip next to the
+   name already conveys the current branch in both modes. */
+.project-row .branch-text { display: none; }
 
 /* Compact mode — applied to <body> when settings.compact is on */
 body.compact-mode .project-row .path { display: none; }
-body.compact-mode .project-row .branch-text { display: none; }
-body.compact-mode .project-row .branch-wrap { padding-left: 8px; padding-right: 8px; }
 body.compact-mode .project-row { padding-top: 10px; padding-bottom: 10px; }
 
 .swatch {

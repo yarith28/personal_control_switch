@@ -6,6 +6,7 @@ function serializeProject(p) {
   if (p.current) out.current = p.current;
   if (typeof p.ahead === 'number')  out.ahead  = p.ahead;
   if (typeof p.behind === 'number') out.behind = p.behind;
+  if (typeof p.uncommitted === 'number') out.uncommitted = p.uncommitted;
   return out;
 }
 

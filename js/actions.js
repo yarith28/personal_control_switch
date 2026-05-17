@@ -6,7 +6,7 @@ import { persist } from './persist.js';
 import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
 import { setRowBusy } from './render-row.js';
-import { confirmDialog } from './modal.js';
+import { confirmDialog, promptDialog } from './modal.js';
 
 export function updateBatchButtons() {
   const projects = getProjects();
@@ -35,36 +35,56 @@ export function updateBatchButtons() {
   }
 }
 
-export async function doPull(project, row) {
-  setRowBusy(row, true);
+export async function doPull(project) {
+  setRowBusy(project, true);
   log(`[${basename(project.path)}] pulling...`);
   const res = await window.api.pull(project.path);
   const tag = res.ok ? 'pull complete' : 'pull failed';
   const detail = (res.stdout + res.stderr).trim();
   log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
-  setRowBusy(row, false);
+  setRowBusy(project, false);
   await refreshAll({ force: true });
 }
 
-export async function doPush(project, row) {
-  setRowBusy(row, true);
+export async function doPush(project) {
+  setRowBusy(project, true);
   log(`[${basename(project.path)}] pushing...`);
   const res = await window.api.push(project.path);
   const tag = res.ok ? 'push complete' : 'push failed';
   const detail = (res.stdout + res.stderr).trim();
   log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
-  setRowBusy(row, false);
+  setRowBusy(project, false);
   await refreshAll({ force: true });
 }
 
-export async function doFetch(project, row) {
-  setRowBusy(row, true);
-  log(`[${basename(project.path)}] fetching...`);
-  const res = await window.api.fetch(project.path);
-  const tag = res.ok ? 'fetch complete' : 'fetch failed';
+export async function doQuickCommit(project) {
+  // Sniff working-tree changes first so we don't prompt for a message when
+  // there's nothing to stage.
+  const status = await window.api.gitStatus(project.path);
+  if (!status.ok) {
+    log(`[${basename(project.path)}] status failed: ${status.error}`, true);
+    return;
+  }
+  if (status.changedCount === 0) {
+    log(`[${basename(project.path)}] nothing to commit`, true);
+    return;
+  }
+  const message = await promptDialog({
+    message: `Commit ${status.changedCount} change${status.changedCount === 1 ? '' : 's'} in ${basename(project.path)}`,
+    detail: 'All staged and unstaged changes will be added (git add -A) and committed.',
+    defaultValue: 'WIP',
+    placeholder: 'Commit message',
+    confirmText: 'Commit',
+  });
+  if (!message) return;
+
+  setRowBusy(project, true);
+  log(`[${basename(project.path)}] committing "${message}"...`);
+  const res = await window.api.commitAll(project.path, message);
+  const tag = res.ok ? 'commit complete' : 'commit failed';
   const detail = (res.stdout + res.stderr).trim();
   log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
-  setRowBusy(row, false);
+  setRowBusy(project, false);
   await refreshAll({ force: true });
 }
 
@@ -105,26 +125,21 @@ export async function batchOp(opName, opFn) {
   if (targets.length === 0) return;
   log(`${opName} ${targets.length} project(s)...`);
 
-  // Mark every queued row busy up front so the user can see what's still pending.
-  const rows = targets.map((p) => projectsEl.querySelector(
-    `.project-row[data-path="${CSS.escape(p.path)}"]`
-  ));
-  rows.forEach((row) => row && setRowBusy(row, true));
+  // Mark every queued project busy up front so the user can see what's pending.
+  targets.forEach((p) => setRowBusy(p, true));
 
   try {
-    for (let i = 0; i < targets.length; i++) {
-      const project = targets[i];
-      const row = rows[i];
+    for (const project of targets) {
       log(`[${basename(project.path)}] ${opName.toLowerCase()}...`, true);
       const res = await opFn(project.path);
       const tag = res.ok ? 'ok' : 'failed';
       const detail = (res.stdout + res.stderr).trim();
       log(`[${basename(project.path)}] ${tag}${detail ? ': ' + detail.split('\n')[0] : ''}`, true);
-      if (row) setRowBusy(row, false);
+      setRowBusy(project, false);
     }
   } finally {
-    // Safety net in case a row was still flagged busy on early exit
-    rows.forEach((row) => row && setRowBusy(row, false));
+    // Safety net in case anything was still flagged busy on early exit
+    targets.forEach((p) => setRowBusy(p, false));
   }
   await refreshAll({ force: true });
   log(`${opName} done.`, true);

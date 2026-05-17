@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld('api', {
   windowClose: () => ipcRenderer.invoke('window-close'),
   openTerminal: (repoPath) => ipcRenderer.invoke('open-terminal', repoPath),
   fetch: (repoPath) => ipcRenderer.invoke('fetch', repoPath),
+  gitStatus: (repoPath) => ipcRenderer.invoke('git-status', repoPath),
+  commitAll: (repoPath, message) => ipcRenderer.invoke('git-commit-all', repoPath, message),
 });

@@ -1,9 +1,10 @@
 import { state, findProjectByPath, findFolderById, findLocation, removeItem } from './state.js';
+import { projectsEl } from './dom.js';
 import { basename, displayPath, positionDropdown } from './util.js';
 import { log } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
-import { doPull, doPush, doFetch, removeProject, updateBatchButtons } from './actions.js';
+import { doPull, doPush, doQuickCommit, removeProject, updateBatchButtons } from './actions.js';
 import { renderProjects } from './render-list.js';
 
 export function renderRow(project, parentFolder = null) {
@@ -42,7 +43,16 @@ export function renderRow(project, parentFolder = null) {
   const name = document.createElement('div');
   name.className = 'name';
   const nameText = document.createElement('span');
+  nameText.className = 'name-text';
   nameText.textContent = basename(project.path);
+  nameText.title = 'Open terminal here';
+  nameText.addEventListener('click', async (e) => {
+    if (state.organizeMode || state.multiSelect) return;
+    if (row.classList.contains('busy')) return;
+    e.stopPropagation();
+    const res = await window.api.openTerminal(project.path);
+    if (!res.ok) log(`[${basename(project.path)}] failed to open terminal: ${res.error}`);
+  });
   const nameBranch = document.createElement('span');
   nameBranch.className = 'name-branch';
   nameBranch.textContent = project.current || '';
@@ -55,11 +65,7 @@ export function renderRow(project, parentFolder = null) {
   info.appendChild(name);
   info.appendChild(fullPath);
 
-  // custom branch dropdown (portal)
-  const branchText = document.createElement('span');
-  branchText.className = 'branch-text';
-  branchText.textContent = project.current || project.error || '—';
-
+  // branch dropdown (portal) — opens from the inline name-branch chip
   const branchDropdown = document.createElement('div');
   branchDropdown.className = 'branch-dropdown';
   document.body.appendChild(branchDropdown);
@@ -75,12 +81,11 @@ export function renderRow(project, parentFolder = null) {
         e.stopPropagation();
         closeDropdown();
         if (b === project.current) return;
-        setRowBusy(row, true);
+        setRowBusy(project, true);
         log(`[${basename(project.path)}] checking out ${b}...`);
         const res = await window.api.checkout(project.path, b);
         if (res.ok) {
           project.current = b;
-          branchText.textContent = b;
           nameBranch.textContent = b;
           branchDropdown.querySelectorAll('.branch-option').forEach((el) =>
             el.classList.toggle('active', el.textContent === b)
@@ -90,38 +95,20 @@ export function renderRow(project, parentFolder = null) {
           log(`[${basename(project.path)}] checkout failed: ${res.stderr.trim()}`, true);
           await refreshBranches(project);
         }
-        setRowBusy(row, false);
+        setRowBusy(project, false);
       });
       branchDropdown.appendChild(opt);
     }
-  }
-
-  const branchWrap = document.createElement('div');
-  branchWrap.className = 'branch-wrap' + (!project.branches ? ' disabled' : '');
-  branchWrap.title = 'Switch branch';
-  branchWrap.insertAdjacentHTML('afterbegin',
-    `<svg class="branch-icon" width="12" height="13" viewBox="0 0 12 13" fill="none">
-      <circle cx="2.5" cy="2.5" r="1.6" stroke="currentColor" stroke-width="1.15"/>
-      <circle cx="9.5" cy="2.5" r="1.6" stroke="currentColor" stroke-width="1.15"/>
-      <circle cx="2.5" cy="10.5" r="1.6" stroke="currentColor" stroke-width="1.15"/>
-      <path d="M2.5 4.1V8.9" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
-      <path d="M9.5 4.1C9.5 6.3 2.5 6.3 2.5 8.9" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
-    </svg>`
-  );
-  branchWrap.appendChild(branchText);
-
-  if (project.branches) {
-    branchWrap.addEventListener('click', (e) => {
+    nameBranch.classList.add('clickable');
+    nameBranch.title = 'Switch branch';
+    nameBranch.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (row.classList.contains('busy')) return;
       const isOpen = branchDropdown.classList.contains('open');
       document.querySelectorAll('.branch-dropdown.open').forEach((d) => d.classList.remove('open'));
-      document.querySelectorAll('.branch-wrap.open').forEach((w) => w.classList.remove('open'));
       if (!isOpen) {
-        const rect = branchWrap.getBoundingClientRect();
-        branchDropdown.style.minWidth = rect.width + 'px';
         branchDropdown.classList.add('open');
-        branchWrap.classList.add('open');
-        positionDropdown(branchDropdown, rect);
+        positionDropdown(branchDropdown, nameBranch.getBoundingClientRect());
       }
     });
   }
@@ -137,7 +124,7 @@ export function renderRow(project, parentFolder = null) {
     <path d="M3 6.5L6.5 10L10 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
   pullBtn.disabled = !project.branches;
-  pullBtn.addEventListener('click', () => doPull(project, row));
+  pullBtn.addEventListener('click', () => doPull(project));
   if (project.behind > 0) {
     const badge = document.createElement('span');
     badge.className = 'btn-badge';
@@ -153,7 +140,7 @@ export function renderRow(project, parentFolder = null) {
     <path d="M3 6.5L6.5 3L10 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
   pushBtn.disabled = !project.branches;
-  pushBtn.addEventListener('click', () => doPush(project, row));
+  pushBtn.addEventListener('click', () => doPush(project));
   if (project.ahead > 0) {
     const badge = document.createElement('span');
     badge.className = 'btn-badge';
@@ -161,34 +148,22 @@ export function renderRow(project, parentFolder = null) {
     pushBtn.appendChild(badge);
   }
 
-  const fetchBtn = document.createElement('button');
-  fetchBtn.className = 'btn btn-fetch';
-  fetchBtn.title = 'Fetch';
-  fetchBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-    <path d="M11 6.5A4.5 4.5 0 1 1 9.7 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    <path d="M8.2 3.7L9.7 3.3L10.1 1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  const commitBtn = document.createElement('button');
+  commitBtn.className = 'btn btn-commit';
+  commitBtn.title = 'Quick commit';
+  commitBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+    <line x1="6.5" y1="1" x2="6.5" y2="4.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    <line x1="6.5" y1="8.8" x2="6.5" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    <circle cx="6.5" cy="6.5" r="2.3" stroke="currentColor" stroke-width="1.4" fill="none"/>
   </svg>`;
-  fetchBtn.disabled = !project.branches;
-  fetchBtn.addEventListener('click', () => doFetch(project, row));
+  commitBtn.disabled = !project.branches || !project.uncommitted;
+  commitBtn.addEventListener('click', () => doQuickCommit(project));
 
   btnRow.appendChild(pullBtn);
   btnRow.appendChild(pushBtn);
-  btnRow.appendChild(fetchBtn);
+  btnRow.appendChild(commitBtn);
 
-  const termBtn = document.createElement('button');
-  termBtn.className = 'btn-terminal';
-  termBtn.title = 'Open terminal here';
-  termBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-    <rect x="1" y="1" width="12" height="12" rx="2.5" stroke="currentColor" stroke-width="1.2"/>
-    <path d="M3.5 5.5L6 7.5L3.5 9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-    <line x1="7.5" y1="9.5" x2="10.5" y2="9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-  </svg>`;
-  termBtn.addEventListener('click', async () => {
-    const res = await window.api.openTerminal(project.path);
-    if (!res.ok) log(`[${basename(project.path)}] failed to open terminal: ${res.error}`);
-  });
-
-  const moveBtn = document.createElement('button');
+const moveBtn = document.createElement('button');
   moveBtn.className = 'btn-move';
   moveBtn.title = 'Move to folder';
   moveBtn.innerHTML = `<svg width="14" height="13" viewBox="0 0 15 13" fill="none"><path d="M1 2.5C1 1.67 1.67 1 2.5 1H5.5L7 2.5H12.5C13.33 2.5 14 3.17 14 4V10.5C14 11.33 13.33 12 12.5 12H2.5C1.67 12 1 11.33 1 10.5V2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
@@ -297,20 +272,35 @@ export function renderRow(project, parentFolder = null) {
   row.appendChild(handle);
   row.appendChild(checkboxLabel);
   row.appendChild(info);
-  row.appendChild(branchWrap);
   row.appendChild(btnRow);
-  row.appendChild(termBtn);
   row.appendChild(moveBtn);
   row.appendChild(removeBtn);
+
+  // If an action was already running when this row was (re-)rendered,
+  // restore the busy visual + disable state.
+  if (project.busy) {
+    row.classList.add('busy');
+    row.querySelectorAll('button, input').forEach((el) => {
+      if (!el.classList.contains('remove')) el.disabled = true;
+    });
+  }
 
   return row;
 }
 
-export function setRowBusy(row, busy) {
+// Always look up the current row by project path so we operate on whatever
+// node is actually attached to the DOM right now — re-renders during long
+// operations would otherwise leave stale refs pointing at detached nodes.
+export function setRowBusy(project, busy) {
+  if (!project) return;
+  project.busy = busy;
+  const row = projectsEl.querySelector(
+    `.project-row[data-path="${CSS.escape(project.path)}"]`
+  );
+  if (!row) return;
   row.classList.toggle('busy', busy);
   row.querySelectorAll('button, input').forEach((el) => {
     if (el.classList.contains('remove')) return;
     el.disabled = busy;
   });
-  row.querySelector('.branch-wrap')?.classList.toggle('busy', busy);
 }

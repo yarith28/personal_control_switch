@@ -7,7 +7,7 @@ import { state, getProjects } from './js/state.js';
 import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
 import { FONTS, applyFont, buildFontPicker } from './js/fonts.js';
 import { persist } from './js/persist.js';
-import { fetchAndRefreshAll } from './js/branches.js';
+import { refreshAll } from './js/branches.js';
 import { addProject, batchOp } from './js/actions.js';
 import { addFolder } from './js/render-folder.js';
 import { renderProjects } from './js/render-list.js';
@@ -84,12 +84,12 @@ collapseBtn.addEventListener('click', async () => {
 
   document.getElementById('projects')?.addEventListener('scroll', closeAllDropdowns);
 
-  // Auto-refresh: fetch from origin when the window regains focus, and
-  // periodically while the window is active. fetchAndRefreshAll() debounces
-  // to once per 30s of real network traffic, so alt-tab spam is cheap.
-  window.addEventListener('focus', () => fetchAndRefreshAll());
+  // Auto-refresh: re-read local git state on focus and on a 60s interval
+  // while the window is active. No network — to fetch from origin, use the
+  // batch Fetch button (or pull, which fetches as part of its operation).
+  window.addEventListener('focus', () => refreshAll({ force: true, source: 'focus' }));
   setInterval(() => {
-    if (document.hasFocus()) fetchAndRefreshAll();
+    if (document.hasFocus()) refreshAll({ force: true, source: 'interval' });
   }, 60 * 1000);
 
   const config = await window.api.loadConfig();
@@ -143,6 +143,7 @@ collapseBtn.addEventListener('click', async () => {
     current:  p.current  || null,
     ahead:    typeof p.ahead  === 'number' ? p.ahead  : null,
     behind:   typeof p.behind === 'number' ? p.behind : null,
+    uncommitted: typeof p.uncommitted === 'number' ? p.uncommitted : 0,
     error:    null,
   });
 
@@ -187,5 +188,5 @@ collapseBtn.addEventListener('click', async () => {
   // so ahead/behind counts are accurate the first time the user looks.
   renderProjects();
   persist();
-  fetchAndRefreshAll({ force: true });
+  refreshAll({ force: true, source: 'startup' });
 })();

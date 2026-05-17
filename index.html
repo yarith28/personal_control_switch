@@ -35,6 +35,18 @@
       <div class="toolbar">
         <button id="add-project" class="btn btn-primary">+ Add project</button>
         <div class="toolbar-spacer"></div>
+        <button id="multi-select-btn" class="btn-select-toggle icon-only" title="Batch select">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="3" x2="12" y2="3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="8" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        </button>
+        <button id="organize-btn" class="btn-select-toggle icon-only" title="Edit / organize">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M9 1.5L11.5 4L5 10.5L1.5 11.5L2.5 8L9 1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="collapse-btn" class="btn-select-toggle icon-only" title="Collapse all folders" disabled>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <g class="icon-collapse"><path d="M3 6L6.5 2.5L10 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 10.5L6.5 7L10 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
+            <g class="icon-expand"><path d="M3 2.5L6.5 6L10 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 7L6.5 10.5L10 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
+          </svg>
+        </button>
         <button id="output-toggle" class="btn-select-toggle icon-only" title="Toggle log">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><line x1="2" y1="3.5" x2="11" y2="3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="6.5" x2="11" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="9.5" x2="8" y2="9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         </button>
@@ -60,18 +72,6 @@
             </div>
           </div>
         </div>
-        <button id="multi-select-btn" class="btn-select-toggle icon-only" title="Batch select">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="3" x2="12" y2="3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="8" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-        </button>
-        <button id="organize-btn" class="btn-select-toggle icon-only" title="Edit / organize">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M9 1.5L11.5 4L5 10.5L1.5 11.5L2.5 8L9 1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <button id="collapse-btn" class="btn-select-toggle icon-only" title="Collapse all folders" disabled>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <g class="icon-collapse"><path d="M3 6L6.5 2.5L10 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 10.5L6.5 7L10 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
-            <g class="icon-expand"><path d="M3 2.5L6.5 6L10 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 7L6.5 10.5L10 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>
-          </svg>
-        </button>
       </div>
       <div class="edit-bar" id="edit-bar">
         <button id="add-folder-btn" class="btn btn-primary">+ Folder</button>
@@ -107,6 +107,7 @@
       <div class="modal-card">
         <div class="modal-message" id="modal-message"></div>
         <div class="modal-detail" id="modal-detail"></div>
+        <input class="modal-input" id="modal-input" type="text" hidden />
         <div class="modal-actions">
           <button class="btn modal-cancel" id="modal-cancel">Cancel</button>
           <button class="btn modal-confirm" id="modal-confirm">Remove</button>
