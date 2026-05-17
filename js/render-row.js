@@ -102,11 +102,6 @@ export function renderRow(project, parentFolder = null) {
     </svg>`
   );
   branchWrap.appendChild(branchText);
-  branchWrap.insertAdjacentHTML('beforeend',
-    `<svg class="branch-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
-      <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>`
-  );
 
   if (project.branches) {
     branchWrap.addEventListener('click', (e) => {
@@ -305,6 +300,7 @@ export function renderRow(project, parentFolder = null) {
 }
 
 export function setRowBusy(row, busy) {
+  row.classList.toggle('busy', busy);
   row.querySelectorAll('button, input').forEach((el) => {
     if (el.classList.contains('remove')) return;
     el.disabled = busy;

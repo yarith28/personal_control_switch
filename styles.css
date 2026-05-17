@@ -574,6 +574,8 @@ input[type='checkbox']:disabled + .checkbox-box {
 }
 .project-row.dragging { opacity: 0.35; transform: none; }
 .project-row.drag-over { border-top-color: var(--branch-color); }
+.project-row.busy { opacity: 0.55; }
+.project-row.busy:hover { background: var(--glass-bg); }
 
 .project-row .info { flex: 1; min-width: 0; }
 .project-row .name {

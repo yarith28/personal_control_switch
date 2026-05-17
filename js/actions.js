@@ -104,17 +104,27 @@ export async function batchOp(opName, opFn) {
   const targets = getProjects().filter((p) => p.selected && p.branches);
   if (targets.length === 0) return;
   log(`${opName} ${targets.length} project(s)...`);
-  for (const project of targets) {
-    const row = projectsEl.querySelector(
-      `.project-row[data-path="${CSS.escape(project.path)}"]`
-    );
-    if (row) setRowBusy(row, true);
-    log(`[${basename(project.path)}] ${opName.toLowerCase()}...`, true);
-    const res = await opFn(project.path);
-    const tag = res.ok ? 'ok' : 'failed';
-    const detail = (res.stdout + res.stderr).trim();
-    log(`[${basename(project.path)}] ${tag}${detail ? ': ' + detail.split('\n')[0] : ''}`, true);
-    if (row) setRowBusy(row, false);
+
+  // Mark every queued row busy up front so the user can see what's still pending.
+  const rows = targets.map((p) => projectsEl.querySelector(
+    `.project-row[data-path="${CSS.escape(p.path)}"]`
+  ));
+  rows.forEach((row) => row && setRowBusy(row, true));
+
+  try {
+    for (let i = 0; i < targets.length; i++) {
+      const project = targets[i];
+      const row = rows[i];
+      log(`[${basename(project.path)}] ${opName.toLowerCase()}...`, true);
+      const res = await opFn(project.path);
+      const tag = res.ok ? 'ok' : 'failed';
+      const detail = (res.stdout + res.stderr).trim();
+      log(`[${basename(project.path)}] ${tag}${detail ? ': ' + detail.split('\n')[0] : ''}`, true);
+      if (row) setRowBusy(row, false);
+    }
+  } finally {
+    // Safety net in case a row was still flagged busy on early exit
+    rows.forEach((row) => row && setRowBusy(row, false));
   }
   await refreshAll({ force: true });
   log(`${opName} done.`, true);
