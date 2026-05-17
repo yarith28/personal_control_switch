@@ -123,9 +123,11 @@ ipcMain.handle('save-config', (_, config) => {
 });
 
 ipcMain.handle('pick-folder', async () => {
-  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
-  if (result.canceled) return null;
-  return result.filePaths[0];
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'multiSelections'],
+  });
+  if (result.canceled) return [];
+  return result.filePaths;
 });
 
 ipcMain.handle('get-branches', async (_, repoPath) => {

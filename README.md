@@ -46,7 +46,7 @@ Produces a `.dmg` at `dist/Git Sync-*.dmg`.
 
 ## Usage
 
-1. Click **Add project** and pick a git repository folder
+1. Click **Add project** and pick one or more git repository folders
 2. Use the branch dropdown to switch branches
 3. Click **Pull** or **Push** per project, or check multiple projects and use **Pull selected** / **Push selected**
 4. The **Log** panel at the bottom shows output — click it to collapse/expand

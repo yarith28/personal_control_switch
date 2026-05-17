@@ -89,22 +89,39 @@ export async function doQuickCommit(project) {
 }
 
 export async function addProject() {
-  const dir = await window.api.pickFolder();
-  if (!dir) return;
-  if (getProjects().some((p) => p.path === dir)) {
-    log(`Already in list: ${dir}`);
-    return;
+  const dirs = await window.api.pickFolders();
+  if (!Array.isArray(dirs) || dirs.length === 0) return;
+
+  const existing = new Set(getProjects().map((p) => p.path));
+  const added = [];
+
+  for (const dir of dirs) {
+    if (existing.has(dir)) {
+      log(`Already in list: ${dir}`);
+      continue;
+    }
+
+    const project = { type: 'project', path: dir, selected: false };
+    await refreshBranches(project);
+    if (!project.branches) {
+      log(`Cannot add ${dir}: ${project.error}`);
+      continue;
+    }
+
+    state.items.push(project);
+    existing.add(dir);
+    added.push(dir);
   }
-  const project = { type: 'project', path: dir, selected: false };
-  await refreshBranches(project);
-  if (!project.branches) {
-    log(`Cannot add ${dir}: ${project.error}`);
-    return;
-  }
-  state.items.push(project);
+
+  if (added.length === 0) return;
+
   await persist();
   renderProjects();
-  log(`Added ${dir}`);
+  log(
+    added.length === 1
+      ? `Added ${added[0]}`
+      : `Added ${added.length} projects`
+  );
 }
 
 export async function removeProject(project) {

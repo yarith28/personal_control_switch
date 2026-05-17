@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   loadConfig: () => ipcRenderer.invoke('load-config'),
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
-  pickFolder: () => ipcRenderer.invoke('pick-folder'),
+  pickFolders: () => ipcRenderer.invoke('pick-folder'),
   getBranches: (repoPath) => ipcRenderer.invoke('get-branches', repoPath),
   checkout: (repoPath, branch) => ipcRenderer.invoke('checkout', repoPath, branch),
   pull: (repoPath) => ipcRenderer.invoke('pull', repoPath),
