@@ -38,12 +38,12 @@ async function createWindow() {
     },
   });
 
-  const saveBounds = debounce(async () => {
+  const saveBounds = debounce(() => {
     if (win.isMaximized() || win.isMinimized()) return;
     const b = win.getBounds();
-    const cfg = await loadConfig();
-    cfg.window = { width: b.width, height: b.height, x: b.x, y: b.y };
-    await saveConfig(cfg);
+    updateConfig((cfg) => {
+      cfg.window = { width: b.width, height: b.height, x: b.x, y: b.y };
+    });
   }, 400);
 
   win.on('resize', saveBounds);
@@ -102,14 +102,20 @@ async function loadConfig() {
   }
 }
 
-async function saveConfig(config) {
-  await fs.writeFile(configPath(), JSON.stringify(config, null, 2), 'utf8');
+let configMutex = Promise.resolve();
+
+function updateConfig(mutator) {
+  configMutex = configMutex.then(async () => {
+    const cfg = await loadConfig();
+    mutator(cfg);
+    await fs.writeFile(configPath(), JSON.stringify(cfg, null, 2), 'utf8');
+  });
+  return configMutex;
 }
 
 ipcMain.handle('load-config', loadConfig);
-ipcMain.handle('save-config', async (_, config) => {
-  const existing = await loadConfig();
-  return saveConfig({ ...existing, ...config });
+ipcMain.handle('save-config', (_, config) => {
+  return updateConfig((cfg) => { Object.assign(cfg, config); });
 });
 
 ipcMain.handle('pick-folder', async () => {
