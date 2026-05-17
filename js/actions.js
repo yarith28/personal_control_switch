@@ -1,4 +1,4 @@
-import { selectAll, pullSelectedBtn, pushSelectedBtn, projectsEl } from './dom.js';
+import { selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn, projectsEl } from './dom.js';
 import { state, getProjects, removeItem } from './state.js';
 import { basename } from './util.js';
 import { log } from './log.js';
@@ -13,6 +13,7 @@ export function updateBatchButtons() {
   const anySelected = projects.some((p) => p.selected && p.branches);
   pullSelectedBtn.disabled = !anySelected;
   pushSelectedBtn.disabled = !anySelected;
+  fetchSelectedBtn.disabled = !anySelected;
 
   const selectable = projects.filter((p) => p.branches);
   selectAll.checked =
@@ -50,6 +51,17 @@ export async function doPush(project, row) {
   log(`[${basename(project.path)}] pushing...`);
   const res = await window.api.push(project.path);
   const tag = res.ok ? 'push complete' : 'push failed';
+  const detail = (res.stdout + res.stderr).trim();
+  log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
+  setRowBusy(row, false);
+  await refreshAll({ force: true });
+}
+
+export async function doFetch(project, row) {
+  setRowBusy(row, true);
+  log(`[${basename(project.path)}] fetching...`);
+  const res = await window.api.fetch(project.path);
+  const tag = res.ok ? 'fetch complete' : 'fetch failed';
   const detail = (res.stdout + res.stderr).trim();
   log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
   setRowBusy(row, false);

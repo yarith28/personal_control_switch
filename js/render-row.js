@@ -1,9 +1,9 @@
 import { state, findProjectByPath, findFolderById, findLocation, removeItem } from './state.js';
-import { basename, displayPath } from './util.js';
+import { basename, displayPath, positionDropdown } from './util.js';
 import { log } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
-import { doPull, doPush, removeProject, updateBatchButtons } from './actions.js';
+import { doPull, doPush, doFetch, removeProject, updateBatchButtons } from './actions.js';
 import { renderProjects } from './render-list.js';
 
 export function renderRow(project, parentFolder = null) {
@@ -116,11 +116,10 @@ export function renderRow(project, parentFolder = null) {
       document.querySelectorAll('.branch-wrap.open').forEach((w) => w.classList.remove('open'));
       if (!isOpen) {
         const rect = branchWrap.getBoundingClientRect();
-        branchDropdown.style.top  = (rect.bottom + 6) + 'px';
-        branchDropdown.style.left = rect.left + 'px';
         branchDropdown.style.minWidth = rect.width + 'px';
         branchDropdown.classList.add('open');
         branchWrap.classList.add('open');
+        positionDropdown(branchDropdown, rect);
       }
     });
   }
@@ -130,7 +129,11 @@ export function renderRow(project, parentFolder = null) {
 
   const pullBtn = document.createElement('button');
   pullBtn.className = 'btn btn-pull';
-  pullBtn.textContent = 'Pull';
+  pullBtn.title = 'Pull';
+  pullBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+    <path d="M6.5 2V10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M3 6.5L6.5 10L10 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
   pullBtn.disabled = !project.branches;
   pullBtn.addEventListener('click', () => doPull(project, row));
   if (project.behind > 0) {
@@ -142,7 +145,11 @@ export function renderRow(project, parentFolder = null) {
 
   const pushBtn = document.createElement('button');
   pushBtn.className = 'btn btn-push';
-  pushBtn.textContent = 'Push';
+  pushBtn.title = 'Push';
+  pushBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+    <path d="M6.5 11V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M3 6.5L6.5 3L10 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
   pushBtn.disabled = !project.branches;
   pushBtn.addEventListener('click', () => doPush(project, row));
   if (project.ahead > 0) {
@@ -152,8 +159,19 @@ export function renderRow(project, parentFolder = null) {
     pushBtn.appendChild(badge);
   }
 
+  const fetchBtn = document.createElement('button');
+  fetchBtn.className = 'btn btn-fetch';
+  fetchBtn.title = 'Fetch';
+  fetchBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+    <path d="M11 6.5A4.5 4.5 0 1 1 9.7 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M8.2 3.7L9.7 3.3L10.1 1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+  fetchBtn.disabled = !project.branches;
+  fetchBtn.addEventListener('click', () => doFetch(project, row));
+
   btnRow.appendChild(pullBtn);
   btnRow.appendChild(pushBtn);
+  btnRow.appendChild(fetchBtn);
 
   const termBtn = document.createElement('button');
   termBtn.className = 'btn-terminal';
@@ -211,10 +229,8 @@ export function renderRow(project, parentFolder = null) {
         moveDropdown.appendChild(el);
       }
     }
-    const rect = moveBtn.getBoundingClientRect();
-    moveDropdown.style.top = (rect.bottom + 6) + 'px';
-    moveDropdown.style.left = Math.max(8, rect.right - 180) + 'px';
     moveDropdown.classList.add('open');
+    positionDropdown(moveDropdown, moveBtn.getBoundingClientRect(), { align: 'right' });
   });
 
   const removeBtn = document.createElement('button');

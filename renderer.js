@@ -1,12 +1,13 @@
 import './js/log.js'; // registers error/unhandledrejection handlers
 import {
-  addBtn, selectAll, pullSelectedBtn, pushSelectedBtn,
-  multiSelectBtn, organizeBtn, addFolderBtn, refreshBtn, collapseBtn,
+  addBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
+  multiSelectBtn, organizeBtn, addFolderBtn, collapseBtn,
 } from './js/dom.js';
 import { state, getProjects } from './js/state.js';
 import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
+import { FONTS, applyFont, buildFontPicker } from './js/fonts.js';
 import { persist } from './js/persist.js';
-import { refreshAll, refreshBranches, fetchAndRefreshAll } from './js/branches.js';
+import { fetchAndRefreshAll } from './js/branches.js';
 import { addProject, batchOp } from './js/actions.js';
 import { addFolder } from './js/render-folder.js';
 import { renderProjects } from './js/render-list.js';
@@ -19,6 +20,9 @@ pullSelectedBtn.addEventListener('click', () =>
 );
 pushSelectedBtn.addEventListener('click', () =>
   batchOp('Pushing', (p) => window.api.push(p))
+);
+fetchSelectedBtn.addEventListener('click', () =>
+  batchOp('Fetching', (p) => window.api.fetch(p))
 );
 selectAll.addEventListener('change', () => {
   const checked = selectAll.checked;
@@ -36,13 +40,6 @@ collapseBtn.addEventListener('click', async () => {
   folders.forEach((f) => { f.collapsed = !allCollapsed; });
   renderProjects();
   persist();
-});
-refreshBtn.addEventListener('click', async () => {
-  refreshBtn.classList.add('spinning');
-  refreshBtn.disabled = true;
-  await fetchAndRefreshAll();
-  refreshBtn.classList.remove('spinning');
-  refreshBtn.disabled = false;
 });
 
 // ── Init ────────────────────────────────────────────────────────────────────
@@ -62,29 +59,38 @@ refreshBtn.addEventListener('click', async () => {
     ?.addEventListener('click', () => window.api.windowClose());
 
   const outputWrap = document.getElementById('output-wrap');
-  document.getElementById('output-toggle')?.addEventListener('click', () => {
+  const outputToggleBtn = document.getElementById('output-toggle');
+  outputToggleBtn?.addEventListener('click', () => {
     outputWrap.classList.toggle('collapsed');
+    outputToggleBtn.classList.toggle('active', !outputWrap.classList.contains('collapsed'));
     persist();
   });
 
-  const themeSwatches = document.getElementById('theme-swatches');
-  document.getElementById('theme-toggle')?.addEventListener('click', (e) => {
+  const settingsPanel = document.getElementById('settings-panel');
+  document.getElementById('settings-toggle')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    themeSwatches.classList.toggle('open');
+    settingsPanel.classList.toggle('open');
   });
+  settingsPanel?.addEventListener('click', (e) => e.stopPropagation());
   const closeAllDropdowns = () => {
     document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open, .color-palette-dropdown.open').forEach((d) => d.classList.remove('open'));
     document.querySelectorAll('.branch-wrap.open').forEach((w) => w.classList.remove('open'));
   };
 
   document.addEventListener('click', () => {
-    themeSwatches.classList.remove('open');
+    settingsPanel?.classList.remove('open');
     closeAllDropdowns();
   });
 
   document.getElementById('projects')?.addEventListener('scroll', closeAllDropdowns);
 
-  window.addEventListener('focus', () => refreshAll());
+  // Auto-refresh: fetch from origin when the window regains focus, and
+  // periodically while the window is active. fetchAndRefreshAll() debounces
+  // to once per 30s of real network traffic, so alt-tab spam is cheap.
+  window.addEventListener('focus', () => fetchAndRefreshAll());
+  setInterval(() => {
+    if (document.hasFocus()) fetchAndRefreshAll();
+  }, 60 * 1000);
 
   const config = await window.api.loadConfig();
 
@@ -92,7 +98,15 @@ refreshBtn.addEventListener('click', async () => {
   applyTheme(state.currentTheme);
   buildSwatches();
 
-  if (config.logCollapsed) outputWrap.classList.add('collapsed');
+  state.currentFont = FONTS.find((f) => f.id === config.font) || FONTS[0];
+  applyFont(state.currentFont);
+  buildFontPicker();
+
+  if (config.logCollapsed) {
+    outputWrap.classList.add('collapsed');
+  } else {
+    outputToggleBtn?.classList.add('active');
+  }
 
   // Load + migrate items into the nested tree model.
   //   v1 (oldest): config.projects = [{ path }]
@@ -154,8 +168,9 @@ refreshBtn.addEventListener('click', async () => {
     }
   }
 
-  // Render immediately from cache, then refresh git state in the background
+  // Render immediately from cache, then fetch from origin in the background
+  // so ahead/behind counts are accurate the first time the user looks.
   renderProjects();
   persist();
-  refreshAll({ force: true });
+  fetchAndRefreshAll({ force: true });
 })();

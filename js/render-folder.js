@@ -4,6 +4,7 @@ import { persist } from './persist.js';
 import { renderProjects, syncCollapseBtn } from './render-list.js';
 import { updateBatchButtons } from './actions.js';
 import { confirmDialog } from './modal.js';
+import { positionDropdown } from './util.js';
 
 export async function addFolder() {
   const id = 'f' + Date.now();
@@ -154,15 +155,8 @@ export function renderFolderHeader(folder) {
       opt.addEventListener('click', (ev) => { ev.stopPropagation(); setColor(c); });
       colorPalette.appendChild(opt);
     }
-    const rect = colorBtn.getBoundingClientRect();
-    colorPalette.style.top = (rect.bottom + 6) + 'px';
-    colorPalette.style.left = '0px';
     colorPalette.classList.add('open');
-    const width = colorPalette.offsetWidth;
-    let left = rect.right - width;
-    if (left < 8) left = 8;
-    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-    colorPalette.style.left = left + 'px';
+    positionDropdown(colorPalette, colorBtn.getBoundingClientRect(), { align: 'right' });
   });
 
   const deleteBtn = document.createElement('button');
