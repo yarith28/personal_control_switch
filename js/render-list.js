@@ -34,7 +34,10 @@ export function renderProjects() {
   }
 
   updateBatchButtons();
+  syncCollapseBtn();
+}
 
+export function syncCollapseBtn() {
   const folders = state.items.filter((i) => i.type === 'folder');
   const allCollapsed = folders.length > 0 && folders.every((f) => f.collapsed);
   collapseBtn.disabled = folders.length === 0;

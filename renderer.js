@@ -106,20 +106,30 @@ refreshBtn.addEventListener('click', async () => {
     rawItems.some((i) => i.type === 'folder') ||
     rawItems.every((i) => i.type !== 'group');
 
-  const tree = [];
+  const hydrateProject = (p) => ({
+    type: 'project',
+    path: p.path,
+    selected: false,
+    branches: p.branches || null,
+    current:  p.current  || null,
+    ahead:    typeof p.ahead  === 'number' ? p.ahead  : null,
+    behind:   typeof p.behind === 'number' ? p.behind : null,
+    error:    null,
+  });
+
   if (isAlreadyNested) {
     for (const entry of rawItems) {
       if (entry.type === 'folder') {
-        tree.push({
+        state.items.push({
           type: 'folder',
           id: entry.id,
           name: entry.name,
           collapsed: !!entry.collapsed,
           color: entry.color || null,
-          items: (entry.items || []).map((p) => ({ type: 'project', path: p.path })),
+          items: (entry.items || []).map(hydrateProject),
         });
       } else if (entry.type === 'project') {
-        tree.push({ type: 'project', path: entry.path });
+        state.items.push(hydrateProject(entry));
       }
     }
   } else {
@@ -132,36 +142,20 @@ refreshBtn.addEventListener('click', async () => {
           id: entry.id,
           name: entry.name,
           collapsed: !!entry.collapsed,
+          color: null,
           items: [],
         };
-        tree.push(currentFolder);
+        state.items.push(currentFolder);
       } else if (entry.type === 'project') {
-        const proj = { type: 'project', path: entry.path };
+        const proj = hydrateProject(entry);
         if (currentFolder) currentFolder.items.push(proj);
-        else tree.push(proj);
+        else state.items.push(proj);
       }
     }
   }
 
-  // Hydrate projects with branches
-  for (const item of tree) {
-    if (item.type === 'folder') {
-      const hydrated = [];
-      for (const child of item.items) {
-        const proj = { type: 'project', path: child.path, selected: false };
-        await refreshBranches(proj);
-        hydrated.push(proj);
-      }
-      state.items.push({ ...item, items: hydrated });
-    } else {
-      const proj = { type: 'project', path: item.path, selected: false };
-      await refreshBranches(proj);
-      state.items.push(proj);
-    }
-  }
-
-  // Always rewrite in the new nested format
-  await persist();
-
+  // Render immediately from cache, then refresh git state in the background
   renderProjects();
+  persist();
+  refreshAll({ force: true });
 })();

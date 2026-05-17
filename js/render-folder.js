@@ -1,7 +1,7 @@
 import { state, findFolderById, findProjectByPath, findLocation, removeItem } from './state.js';
 import { projectsEl } from './dom.js';
 import { persist } from './persist.js';
-import { renderProjects } from './render-list.js';
+import { renderProjects, syncCollapseBtn } from './render-list.js';
 import { updateBatchButtons } from './actions.js';
 import { confirmDialog } from './modal.js';
 
@@ -207,6 +207,7 @@ export function renderFolderHeader(folder) {
       sibling.hidden = folder.collapsed;
       sibling = sibling.nextElementSibling;
     }
+    syncCollapseBtn();
     await persist();
   });
 

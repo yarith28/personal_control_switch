@@ -1,5 +1,6 @@
 import { getProjects } from './state.js';
 import { renderProjects } from './render-list.js';
+import { persist } from './persist.js';
 
 export async function refreshBranches(project) {
   const res = await window.api.getBranches(project.path);
@@ -31,8 +32,17 @@ export async function refreshAll({ force = false } = {}) {
   if (!force && Date.now() - _lastRefresh < REFRESH_DEBOUNCE_MS) return;
   _refreshing = true;
   try {
-    await Promise.all(getProjects().map((p) => refreshBranches(p)));
+    const projects = getProjects();
+    const CONCURRENCY = 4;
+    let i = 0;
+    const worker = async () => {
+      while (i < projects.length) {
+        await refreshBranches(projects[i++]);
+      }
+    };
+    await Promise.all(Array(CONCURRENCY).fill(0).map(worker));
     renderProjects();
+    persist();
   } finally {
     _refreshing = false;
     _lastRefresh = Date.now();
