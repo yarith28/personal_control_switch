@@ -150,7 +150,6 @@ button, select, input, label, a, pre,
   user-select: none;
 }
 .header-text { min-width: 0; }
-body.platform-darwin .header-text { padding-left: 70px; }
 
 .title {
   margin: 0;
@@ -165,7 +164,6 @@ body.platform-darwin .header-text { padding-left: 70px; }
 
 /* window controls */
 .window-controls { -webkit-app-region: no-drag; display: flex; gap: 6px; flex-shrink: 0; }
-body.platform-darwin .window-controls { display: none; }
 
 .win-btn {
   width: 28px;

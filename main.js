@@ -22,14 +22,14 @@ function debounce(fn, ms) {
 async function createWindow() {
   const config = await loadConfig();
   const saved = config.window || {};
+  const isMac = process.platform === 'darwin';
 
   const win = new BrowserWindow({
     width:  saved.width  || 820,
     height: saved.height || 500,
     ...(saved.x != null && saved.y != null ? { x: saved.x, y: saved.y } : {}),
     frame: false,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 16, y: 18 },
+    ...(!isMac ? { titleBarStyle: 'hidden' } : {}),
     backgroundColor: '#ede9fe',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -48,6 +48,10 @@ async function createWindow() {
 
   win.on('resize', saveBounds);
   win.on('move',   saveBounds);
+
+  if (isMac) {
+    win.setWindowButtonVisibility(false);
+  }
 
   win.loadFile('index.html');
 }
