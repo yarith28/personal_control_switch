@@ -59,16 +59,27 @@ export function promptDialog({ message, detail, defaultValue = '', placeholder =
       inputEl.select();
     });
 
+    // Disable confirm while input is empty
+    const syncConfirmEnabled = () => {
+      confirmBtn.disabled = !inputEl.value.trim();
+    };
+    syncConfirmEnabled();
+
     const cleanup = (result) => {
       overlay.classList.remove('open');
-      setTimeout(() => { overlay.hidden = true; inputEl.hidden = true; }, 180);
+      setTimeout(() => { overlay.hidden = true; inputEl.hidden = true; confirmBtn.disabled = false; }, 180);
       confirmBtn.removeEventListener('click', onConfirm);
       cancelBtn.removeEventListener('click', onCancel);
       overlay.removeEventListener('click', onBackdrop);
+      inputEl.removeEventListener('input', syncConfirmEnabled);
       document.removeEventListener('keydown', onKey);
       resolve(result);
     };
-    const onConfirm = () => cleanup(inputEl.value.trim() || defaultValue || null);
+    const onConfirm = () => {
+      const v = inputEl.value.trim();
+      if (!v) return; // never allow empty
+      cleanup(v);
+    };
     const onCancel  = () => cleanup(null);
     const onBackdrop = (e) => { if (e.target === overlay) cleanup(null); };
     const onKey = (e) => {
@@ -78,6 +89,7 @@ export function promptDialog({ message, detail, defaultValue = '', placeholder =
     confirmBtn.addEventListener('click', onConfirm);
     cancelBtn.addEventListener('click', onCancel);
     overlay.addEventListener('click', onBackdrop);
+    inputEl.addEventListener('input', syncConfirmEnabled);
     document.addEventListener('keydown', onKey);
   });
 }

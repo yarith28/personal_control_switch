@@ -72,7 +72,7 @@ export async function doQuickCommit(project) {
   const message = await promptDialog({
     message: `Commit ${status.changedCount} change${status.changedCount === 1 ? '' : 's'} in ${basename(project.path)}`,
     detail: 'All staged and unstaged changes will be added (git add -A) and committed.',
-    defaultValue: 'WIP',
+    defaultValue: '',
     placeholder: 'Commit message',
     confirmText: 'Commit',
   });
