@@ -18,4 +18,9 @@ contextBridge.exposeInMainWorld('api', {
   fetch: (repoPath) => ipcRenderer.invoke('fetch', repoPath),
   gitStatus: (repoPath) => ipcRenderer.invoke('git-status', repoPath),
   commitAll: (repoPath, message) => ipcRenderer.invoke('git-commit-all', repoPath, message),
+  onGitProgress: (listener) => {
+    const wrapped = (_, payload) => listener(payload);
+    ipcRenderer.on('git-progress', wrapped);
+    return () => ipcRenderer.removeListener('git-progress', wrapped);
+  },
 });

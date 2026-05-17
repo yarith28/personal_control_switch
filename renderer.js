@@ -1,6 +1,6 @@
-import './js/log.js'; // registers error/unhandledrejection handlers
+import { log } from './js/log.js'; // registers error/unhandledrejection handlers
 import {
-  addBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
+  addBtn, fetchAllBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
   multiSelectBtn, organizeBtn, addFolderBtn, collapseBtn,
 } from './js/dom.js';
 import { state, getProjects } from './js/state.js';
@@ -8,13 +8,53 @@ import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
 import { FONTS, applyFont, buildFontPicker } from './js/fonts.js';
 import { persist } from './js/persist.js';
 import { refreshAll } from './js/branches.js';
-import { addProject, batchOp } from './js/actions.js';
+import { addProject, batchOp, fetchAllProjects } from './js/actions.js';
 import { addFolder } from './js/render-folder.js';
 import { renderProjects } from './js/render-list.js';
 import { setMultiSelect, setOrganizeMode } from './js/modes.js';
+import { basename } from './js/util.js';
+
+let autoRefreshInitialized = false;
+let startupRefreshTriggered = false;
+let gitProgressSubscribed = false;
+
+function setupAutoRefresh() {
+  if (autoRefreshInitialized) return;
+  autoRefreshInitialized = true;
+
+  window.addEventListener('focus', () => refreshAll({ force: true, source: 'focus' }));
+  setInterval(() => {
+    if (document.hasFocus()) refreshAll({ force: true, source: 'interval' });
+  }, 60 * 1000);
+}
+
+function triggerStartupRefresh() {
+  if (startupRefreshTriggered) return;
+  startupRefreshTriggered = true;
+  refreshAll({ force: true, source: 'startup' });
+}
+
+function subscribeGitProgress() {
+  if (gitProgressSubscribed || typeof window.api.onGitProgress !== 'function') return;
+  gitProgressSubscribed = true;
+
+  window.api.onGitProgress(({ repoPath, text }) => {
+    const repo = basename(repoPath);
+    const lines = text
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (const line of lines) {
+      log(`[${repo}] ${line}`, true);
+    }
+  });
+}
 
 // ── Top-level event listeners ───────────────────────────────────────────────
 addBtn.addEventListener('click', addProject);
+fetchAllBtn.addEventListener('click', fetchAllProjects);
 pullSelectedBtn.addEventListener('click', () =>
   batchOp('Pulling', (p) => window.api.pull(p))
 );
@@ -87,10 +127,8 @@ collapseBtn.addEventListener('click', async () => {
   // Auto-refresh: re-read local git state on focus and on a 60s interval
   // while the window is active. No network — to fetch from origin, use the
   // batch Fetch button (or pull, which fetches as part of its operation).
-  window.addEventListener('focus', () => refreshAll({ force: true, source: 'focus' }));
-  setInterval(() => {
-    if (document.hasFocus()) refreshAll({ force: true, source: 'interval' });
-  }, 60 * 1000);
+  subscribeGitProgress();
+  setupAutoRefresh();
 
   const config = await window.api.loadConfig();
 
@@ -188,5 +226,5 @@ collapseBtn.addEventListener('click', async () => {
   // so ahead/behind counts are accurate the first time the user looks.
   renderProjects();
   persist();
-  refreshAll({ force: true, source: 'startup' });
+  triggerStartupRefresh();
 })();

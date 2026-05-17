@@ -1,4 +1,5 @@
 export const addBtn = document.getElementById('add-project');
+export const fetchAllBtn = document.getElementById('fetch-all');
 export const selectAll = document.getElementById('select-all');
 export const pullSelectedBtn = document.getElementById('pull-selected');
 export const pushSelectedBtn = document.getElementById('push-selected');

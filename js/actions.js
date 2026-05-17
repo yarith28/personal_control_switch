@@ -1,4 +1,4 @@
-import { selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn, projectsEl } from './dom.js';
+import { selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn, fetchAllBtn, projectsEl } from './dom.js';
 import { state, getProjects, removeItem } from './state.js';
 import { basename } from './util.js';
 import { log } from './log.js';
@@ -11,9 +11,11 @@ import { confirmDialog, promptDialog } from './modal.js';
 export function updateBatchButtons() {
   const projects = getProjects();
   const anySelected = projects.some((p) => p.selected && p.branches);
+  const anyFetchable = projects.some((p) => p.branches);
   pullSelectedBtn.disabled = !anySelected;
   pushSelectedBtn.disabled = !anySelected;
   fetchSelectedBtn.disabled = !anySelected;
+  fetchAllBtn.disabled = !anyFetchable;
 
   const selectable = projects.filter((p) => p.branches);
   selectAll.checked =
@@ -40,7 +42,7 @@ export async function doPull(project) {
   log(`[${basename(project.path)}] pulling...`);
   const res = await window.api.pull(project.path);
   const tag = res.ok ? 'pull complete' : 'pull failed';
-  const detail = (res.stdout + res.stderr).trim();
+  const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
   log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
   setRowBusy(project, false);
   await refreshAll({ force: true });
@@ -51,7 +53,7 @@ export async function doPush(project) {
   log(`[${basename(project.path)}] pushing...`);
   const res = await window.api.push(project.path);
   const tag = res.ok ? 'push complete' : 'push failed';
-  const detail = (res.stdout + res.stderr).trim();
+  const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
   log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
   setRowBusy(project, false);
   await refreshAll({ force: true });
@@ -137,8 +139,7 @@ export async function removeProject(project) {
   log(`Removed ${project.path}`);
 }
 
-export async function batchOp(opName, opFn) {
-  const targets = getProjects().filter((p) => p.selected && p.branches);
+async function runBatchOp(opName, targets, opFn) {
   if (targets.length === 0) return;
   log(`${opName} ${targets.length} project(s)...`);
 
@@ -150,7 +151,7 @@ export async function batchOp(opName, opFn) {
       log(`[${basename(project.path)}] ${opName.toLowerCase()}...`, true);
       const res = await opFn(project.path);
       const tag = res.ok ? 'ok' : 'failed';
-      const detail = (res.stdout + res.stderr).trim();
+      const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
       log(`[${basename(project.path)}] ${tag}${detail ? ': ' + detail.split('\n')[0] : ''}`, true);
       setRowBusy(project, false);
     }
@@ -160,4 +161,19 @@ export async function batchOp(opName, opFn) {
   }
   await refreshAll({ force: true });
   log(`${opName} done.`, true);
+}
+
+export async function fetchAllProjects() {
+  const targets = getProjects().filter((p) => p.branches);
+  await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
+}
+
+export async function fetchFolderProjects(folder) {
+  const targets = folder.items.filter((p) => p.branches);
+  await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
+}
+
+export async function batchOp(opName, opFn) {
+  const targets = getProjects().filter((p) => p.selected && p.branches);
+  await runBatchOp(opName, targets, opFn);
 }

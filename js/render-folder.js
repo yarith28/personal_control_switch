@@ -2,7 +2,7 @@ import { state, findFolderById, findProjectByPath, findLocation, removeItem } fr
 import { projectsEl } from './dom.js';
 import { persist } from './persist.js';
 import { renderProjects, syncCollapseBtn } from './render-list.js';
-import { updateBatchButtons } from './actions.js';
+import { fetchFolderProjects, updateBatchButtons } from './actions.js';
 import { confirmDialog } from './modal.js';
 import { positionDropdown } from './util.js';
 
@@ -112,10 +112,31 @@ export function renderFolderHeader(folder) {
     startRename(nameEl);
   });
 
-  // item count
-  const count = document.createElement('span');
-  count.className = 'folder-count';
-  count.textContent = folder.items.length > 0 ? folder.items.length : '';
+  const fetchableCount = folder.items.filter((p) => p.branches).length;
+
+  // folder fetch action
+  const fetchBtn = document.createElement('button');
+  fetchBtn.className = 'folder-fetch-btn';
+  fetchBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+    <path d="M4 2.25V9.25" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M2.25 4L4 2.25L5.75 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M9 10.75V3.75" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M7.25 9L9 10.75L10.75 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+  fetchBtn.title = fetchableCount > 0
+    ? `Fetch all ${fetchableCount} project${fetchableCount === 1 ? '' : 's'} in this folder`
+    : 'No fetchable projects in this folder';
+  fetchBtn.disabled = fetchableCount === 0;
+  fetchBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (fetchBtn.disabled) return;
+    fetchBtn.disabled = true;
+    try {
+      await fetchFolderProjects(folder);
+    } finally {
+      fetchBtn.disabled = false;
+    }
+  });
 
   // color marker (edit mode only)
   const colorBtn = document.createElement('button');
@@ -128,7 +149,13 @@ export function renderFolderHeader(folder) {
   colorPalette.className = 'color-palette-dropdown';
   document.body.appendChild(colorPalette);
 
-  const FOLDER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
+  const FOLDER_COLORS = [
+    '#ef4444', '#f97316', '#f59e0b', '#eab308',
+    '#84cc16', '#22c55e', '#10b981', '#14b8a6',
+    '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
+    '#8b5cf6', '#a855f7', '#d946ef', '#ec4899',
+    '#f43f5e', '#78716c',
+  ];
 
   const setColor = async (color) => {
     colorPalette.classList.remove('open');
@@ -185,7 +212,7 @@ export function renderFolderHeader(folder) {
   el.appendChild(chevron);
   el.appendChild(icon);
   el.appendChild(nameEl);
-  el.appendChild(count);
+  el.appendChild(fetchBtn);
   el.appendChild(colorBtn);
   el.appendChild(deleteBtn);
 
@@ -194,6 +221,7 @@ export function renderFolderHeader(folder) {
     if (state.organizeMode) return;
     if (nameEl.contentEditable === 'true') return;
     if (e.target === deleteBtn) return;
+    if (e.target.closest('.folder-fetch-btn')) return;
     folder.collapsed = !folder.collapsed;
     el.classList.toggle('collapsed', folder.collapsed);
     let sibling = el.nextElementSibling;

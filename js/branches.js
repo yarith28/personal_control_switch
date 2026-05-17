@@ -49,7 +49,7 @@ export async function refreshAll({ force = false, source = '' } = {}) {
   if (!force && Date.now() - _lastRefresh < REFRESH_DEBOUNCE_MS) return;
   _refreshing = true;
   try {
-    if (source) log(`auto-refresh (${source}): re-reading ${projects.length} project(s) (local only)...`);
+    if (source) log(`auto-refresh (${source}): re-reading ${projects.length} project(s)...`);
     await workerPool(projects, 4, refreshBranches);
     renderProjects();
     persist();

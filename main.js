@@ -1,10 +1,33 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 
-Menu.setApplicationMenu(null);
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
+
+function installApplicationMenu() {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    {
+      role: 'editMenu',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]));
+}
 
 // Hot reload in development only (reloads renderer on file changes)
 if (!app.isPackaged) {
@@ -14,6 +37,13 @@ if (!app.isPackaged) {
 }
 
 const execFileP = promisify(execFile);
+
+function gitEnv() {
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
 
 function debounce(fn, ms) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -73,6 +103,7 @@ if (app.isPackaged) {
 }
 
 app.whenReady().then(() => {
+  installApplicationMenu();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -85,11 +116,47 @@ app.on('window-all-closed', () => {
 
 async function runGit(args, cwd) {
   try {
-    const { stdout, stderr } = await execFileP('git', args, { cwd });
+    const { stdout, stderr } = await execFileP('git', args, {
+      cwd,
+      env: gitEnv(),
+    });
     return { ok: true, stdout, stderr };
   } catch (err) {
     return { ok: false, stdout: err.stdout || '', stderr: err.stderr || err.message };
   }
+}
+
+async function runGitStreaming(args, cwd, onProgress) {
+  return await new Promise((resolve) => {
+    const child = spawn('git', args, {
+      cwd,
+      env: gitEnv(),
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      onProgress?.({ stream: 'stdout', text });
+    });
+
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      onProgress?.({ stream: 'stderr', text });
+    });
+
+    child.on('error', (err) => {
+      resolve({ ok: false, stdout, stderr: stderr || err.message, liveOutput: true });
+    });
+
+    child.on('close', (code) => {
+      resolve({ ok: code === 0, stdout, stderr, liveOutput: true });
+    });
+  });
 }
 
 function configPath() {
@@ -158,8 +225,10 @@ ipcMain.handle('get-branches', async (_, repoPath) => {
   };
 });
 
-ipcMain.handle('fetch', async (_, repoPath) => {
-  return await runGit(['fetch', '--prune'], repoPath);
+ipcMain.handle('fetch', async (event, repoPath) => {
+  return await runGitStreaming(['fetch', '--prune'], repoPath, (payload) => {
+    event.sender.send('git-progress', { repoPath, ...payload });
+  });
 });
 
 ipcMain.handle('git-status', async (_, repoPath) => {
@@ -181,12 +250,16 @@ ipcMain.handle('checkout', async (_, repoPath, branch) => {
   return await runGit(['checkout', branch], repoPath);
 });
 
-ipcMain.handle('pull', async (_, repoPath) => {
-  return await runGit(['pull'], repoPath);
+ipcMain.handle('pull', async (event, repoPath) => {
+  return await runGitStreaming(['pull'], repoPath, (payload) => {
+    event.sender.send('git-progress', { repoPath, ...payload });
+  });
 });
 
-ipcMain.handle('push', async (_, repoPath) => {
-  return await runGit(['push'], repoPath);
+ipcMain.handle('push', async (event, repoPath) => {
+  return await runGitStreaming(['push'], repoPath, (payload) => {
+    event.sender.send('git-progress', { repoPath, ...payload });
+  });
 });
 
 ipcMain.handle('confirm-dialog', async (e, { message, detail }) => {
