@@ -36,7 +36,7 @@
         <button id="add-project" class="btn btn-primary">+ Add project</button>
         <div class="toolbar-spacer"></div>
         <button id="output-toggle" class="btn-select-toggle icon-only" title="Toggle log">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1.5" width="11" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M3 5.5L5 7L3 8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><line x1="6" y1="8.5" x2="10" y2="8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><line x1="2" y1="3.5" x2="11" y2="3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="6.5" x2="11" y2="6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="9.5" x2="8" y2="9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         </button>
         <div class="settings-wrap">
           <button id="settings-toggle" class="btn-select-toggle icon-only" title="Settings">
@@ -53,6 +53,10 @@
             <div class="settings-row">
               <div class="settings-label">Font</div>
               <div class="font-picker" id="font-picker"></div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">Compact</div>
+              <button class="toggle-switch" id="compact-toggle" type="button" aria-pressed="false"></button>
             </div>
           </div>
         </div>

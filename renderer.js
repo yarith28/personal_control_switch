@@ -102,6 +102,21 @@ collapseBtn.addEventListener('click', async () => {
   applyFont(state.currentFont);
   buildFontPicker();
 
+  // Compact mode: load saved value, mirror to body class + toggle UI
+  const compactToggle = document.getElementById('compact-toggle');
+  const applyCompactMode = (on) => {
+    state.compactMode = on;
+    document.body.classList.toggle('compact-mode', on);
+    compactToggle?.classList.toggle('active', on);
+    compactToggle?.setAttribute('aria-pressed', String(on));
+  };
+  applyCompactMode(!!config.compact);
+  compactToggle?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    applyCompactMode(!state.compactMode);
+    await persist();
+  });
+
   if (config.logCollapsed) {
     outputWrap.classList.add('collapsed');
   } else {

@@ -14,6 +14,7 @@ export async function persist() {
   await window.api.saveConfig({
     theme: state.currentTheme.id,
     font: state.currentFont?.id || 'system',
+    compact: !!state.compactMode,
     logCollapsed: outputWrap?.classList.contains('collapsed') ?? false,
     items: state.items.map((i) =>
       i.type === 'folder'

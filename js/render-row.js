@@ -41,7 +41,13 @@ export function renderRow(project, parentFolder = null) {
   info.className = 'info';
   const name = document.createElement('div');
   name.className = 'name';
-  name.textContent = basename(project.path);
+  const nameText = document.createElement('span');
+  nameText.textContent = basename(project.path);
+  const nameBranch = document.createElement('span');
+  nameBranch.className = 'name-branch';
+  nameBranch.textContent = project.current || '';
+  name.appendChild(nameText);
+  name.appendChild(nameBranch);
   const fullPath = document.createElement('div');
   fullPath.className = 'path';
   fullPath.textContent = '‎' + displayPath(project.path, state.homedir);
@@ -75,6 +81,7 @@ export function renderRow(project, parentFolder = null) {
         if (res.ok) {
           project.current = b;
           branchText.textContent = b;
+          nameBranch.textContent = b;
           branchDropdown.querySelectorAll('.branch-option').forEach((el) =>
             el.classList.toggle('active', el.textContent === b)
           );

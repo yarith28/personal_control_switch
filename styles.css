@@ -893,6 +893,55 @@ input[type='checkbox']:disabled + .checkbox-box {
   border-color: var(--branch-color);
 }
 
+/* on/off toggle switch (settings panel) */
+.toggle-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.18s ease;
+  flex-shrink: 0;
+}
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  transition: transform 0.18s ease;
+}
+.toggle-switch.active { background: var(--branch-color); }
+.toggle-switch.active::after { transform: translateX(16px); }
+
+/* Inline branch chip next to project name — shown in both modes */
+.name-branch {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--branch-color);
+  background: var(--branch-bg);
+  border-radius: 999px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.name-branch:empty { display: none; }
+
+/* Compact mode — applied to <body> when settings.compact is on */
+body.compact-mode .project-row .path { display: none; }
+body.compact-mode .project-row .branch-text { display: none; }
+body.compact-mode .project-row .branch-wrap { padding-left: 8px; padding-right: 8px; }
+body.compact-mode .project-row { padding-top: 10px; padding-bottom: 10px; }
+
 .swatch {
   width: 22px;
   height: 22px;

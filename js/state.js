@@ -5,6 +5,7 @@ export const state = {
   organizeMode: false,
   currentTheme: null,
   currentFont: null,
+  compactMode: false,
   homedir: null,
 };
 
