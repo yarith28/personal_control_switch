@@ -95,7 +95,7 @@ export function renderFolderHeader(folder) {
   // folder icon
   const icon = document.createElement('span');
   icon.className = 'folder-icon';
-  icon.innerHTML = iconHtml('folder', { size: 12, strokeWidth: 1.8 });
+  icon.innerHTML = iconHtml('folder', { size: 15, strokeWidth: 1.8, attrs: { fill: 'currentColor' } });
 
   const chevron = document.createElement('span');
   chevron.className = 'group-chevron';

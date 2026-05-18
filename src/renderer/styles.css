@@ -407,7 +407,7 @@ input[type='checkbox']:disabled + .checkbox-box {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 18px 5px 18px 2px;
   mask-image: linear-gradient(to bottom, transparent, black 18px, black calc(100% - 18px), transparent);
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 18px, black calc(100% - 18px), transparent);
@@ -518,8 +518,8 @@ input[type='checkbox']:disabled + .checkbox-box {
 }
 .folder-icon svg {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
   overflow: hidden;
 }
 
@@ -683,10 +683,22 @@ input[type='checkbox']:disabled + .checkbox-box {
   content: '';
   position: absolute;
   left: -10px;
-  top: -9px;
+  top: -11px;
   bottom: -1px;
-  width: 1.5px;
+  width: 2.5px;
   background: var(--folder-color, var(--glass-border));
+}
+/* round the top cap on the first member after a folder header */
+:not(.group-member) + .group-member::before {
+  top: -10px;
+  border-top-left-radius: 999px;
+  border-top-right-radius: 999px;
+}
+/* round the bottom cap on the last member of a folder */
+.group-member:last-child::before,
+.group-member:has(+ :not(.group-member))::before {
+  border-bottom-left-radius: 999px;
+  border-bottom-right-radius: 999px;
 }
 
 /* edit bar — shown only in organize mode */
@@ -740,8 +752,8 @@ input[type='checkbox']:disabled + .checkbox-box {
 .project-row .name {
   display: flex;
   align-items: center;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
   min-width: 0;
 }
@@ -753,7 +765,7 @@ input[type='checkbox']:disabled + .checkbox-box {
   flex-shrink: 1;
 }
 .project-row .path {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-faint);
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   overflow: hidden;
