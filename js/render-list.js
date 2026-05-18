@@ -1,5 +1,5 @@
 import { projectsEl, collapseBtn } from './dom.js';
-import { state } from './state.js';
+import { state, pinnedFirst } from './state.js';
 import { renderRow } from './render-row.js';
 import { renderFolderHeader } from './render-folder.js';
 import { updateBatchButtons } from './actions.js';
@@ -17,11 +17,11 @@ export function renderProjects() {
     return;
   }
 
-  for (const item of state.items) {
+  for (const item of pinnedFirst(state.items)) {
     if (item.type === 'folder') {
       projectsEl.appendChild(renderFolderHeader(item));
       const hideChildren = item.collapsed && !state.organizeMode;
-      for (const child of item.items) {
+      for (const child of pinnedFirst(item.items)) {
         const rowEl = renderRow(child, item);
         rowEl.classList.add('group-member');
         if (item.color) rowEl.style.setProperty('--folder-color', item.color);

@@ -45,6 +45,167 @@ function gitEnv() {
   };
 }
 
+function trimGitText(text) {
+  return String(text || '').trim();
+}
+
+function combinedGitOutput(stdout, stderr) {
+  return [trimGitText(stderr), trimGitText(stdout)].filter(Boolean).join('\n');
+}
+
+function defaultGitErrorSummary(command) {
+  switch (command) {
+    case 'fetch':
+      return 'Fetch failed.';
+    case 'pull':
+      return 'Pull failed.';
+    case 'push':
+      return 'Push failed.';
+    case 'commit':
+      return 'Commit failed.';
+    case 'checkout':
+      return 'Branch switch failed.';
+    case 'status':
+      return 'Git status failed.';
+    case 'add':
+      return 'Staging changes failed.';
+    default:
+      return 'Git command failed.';
+  }
+}
+
+function classifyGitFailure(args, stdout, stderr) {
+  const command = args[0] || 'git';
+  const raw = combinedGitOutput(stdout, stderr);
+  const normalized = raw.toLowerCase();
+  const has = (...patterns) => patterns.some((pattern) => normalized.includes(pattern));
+
+  if (
+    has(
+      'terminal prompts disabled',
+      'could not read username',
+      'could not read password',
+      'authentication failed',
+      'permission denied (publickey)',
+      'permission denied (publickey,password)',
+      'repository not found'
+    )
+  ) {
+    return {
+      summary: 'Authentication failed. Git needed credentials, but this app cannot answer interactive prompts.',
+      raw,
+    };
+  }
+
+  if (
+    has(
+      'could not resolve host',
+      'failed to connect',
+      'connection timed out',
+      'operation timed out',
+      'network is unreachable',
+      'connection refused',
+      'connection reset',
+      'unable to access'
+    )
+  ) {
+    return {
+      summary: 'Could not reach the remote repository. Check your network, VPN, or remote URL.',
+      raw,
+    };
+  }
+
+  if (command === 'push' && has('has no upstream branch', 'no upstream branch')) {
+    return {
+      summary: 'No upstream branch is set for this branch.',
+      raw,
+    };
+  }
+
+  if (
+    command === 'push' &&
+    has(
+      'non-fast-forward',
+      'fetch first',
+      'failed to push some refs',
+      '[rejected]'
+    )
+  ) {
+    return {
+      summary: 'Push was rejected because the remote has newer commits.',
+      raw,
+    };
+  }
+
+  if (
+    command === 'pull' &&
+    has(
+      'automatic merge failed',
+      'merge conflict',
+      'fix conflicts and then commit the result',
+      'you have unmerged paths'
+    )
+  ) {
+    return {
+      summary: 'Pull stopped because Git found merge conflicts that need manual resolution.',
+      raw,
+    };
+  }
+
+  if (
+    (command === 'pull' || command === 'push') &&
+    has('there is no tracking information', 'no upstream configured for branch')
+  ) {
+    return {
+      summary: 'No upstream branch is configured for the current branch.',
+      raw,
+    };
+  }
+
+  if (command === 'commit' && has('nothing to commit', 'no changes added to commit')) {
+    return {
+      summary: 'Nothing to commit.',
+      raw,
+    };
+  }
+
+  if (command === 'checkout' && has('pathspec', 'did not match any file')) {
+    return {
+      summary: 'That branch could not be found locally.',
+      raw,
+    };
+  }
+
+  if (has('not a git repository')) {
+    return {
+      summary: 'This folder is not currently a Git repository.',
+      raw,
+    };
+  }
+
+  if (has('couldn\'t find remote ref', 'remote ref does not exist')) {
+    return {
+      summary: 'The requested remote branch or ref does not exist.',
+      raw,
+    };
+  }
+
+  return {
+    summary: defaultGitErrorSummary(command),
+    raw,
+  };
+}
+
+function finalizeGitResult(args, result) {
+  if (result.ok) return result;
+  const failure = classifyGitFailure(args, result.stdout, result.stderr);
+  return {
+    ...result,
+    errorSummary: failure.summary,
+    errorRaw: failure.raw,
+  };
+}
+
 function debounce(fn, ms) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
@@ -120,9 +281,13 @@ async function runGit(args, cwd) {
       cwd,
       env: gitEnv(),
     });
-    return { ok: true, stdout, stderr };
+    return finalizeGitResult(args, { ok: true, stdout, stderr });
   } catch (err) {
-    return { ok: false, stdout: err.stdout || '', stderr: err.stderr || err.message };
+    return finalizeGitResult(args, {
+      ok: false,
+      stdout: err.stdout || '',
+      stderr: err.stderr || err.message,
+    });
   }
 }
 
@@ -150,13 +315,108 @@ async function runGitStreaming(args, cwd, onProgress) {
     });
 
     child.on('error', (err) => {
-      resolve({ ok: false, stdout, stderr: stderr || err.message, liveOutput: true });
+      resolve(finalizeGitResult(args, {
+        ok: false,
+        stdout,
+        stderr: stderr || err.message,
+        liveOutput: true,
+      }));
     });
 
     child.on('close', (code) => {
-      resolve({ ok: code === 0, stdout, stderr, liveOutput: true });
+      resolve(finalizeGitResult(args, {
+        ok: code === 0,
+        stdout,
+        stderr,
+        liveOutput: true,
+      }));
     });
   });
+}
+
+async function openInFileManager(repoPath) {
+  if (process.platform === 'win32') {
+    await execFileP('explorer.exe', [repoPath]);
+    return { ok: true };
+  }
+  if (process.platform === 'darwin') {
+    await execFileP('open', [repoPath]);
+    return { ok: true };
+  }
+  await execFileP('xdg-open', [repoPath]);
+  return { ok: true };
+}
+
+async function openInTerminal(repoPath) {
+  try {
+    if (process.platform === 'win32') {
+      const child = spawn('cmd.exe', ['/c', 'start', 'cmd.exe'], {
+        cwd: repoPath, detached: true, stdio: 'ignore',
+      });
+      child.unref();
+    } else if (process.platform === 'darwin') {
+      execFile('open', ['-a', 'Terminal', repoPath]);
+    } else {
+      for (const t of ['gnome-terminal', 'konsole', 'xfce4-terminal', 'x-terminal-emulator', 'xterm']) {
+        const ch = spawn(t, [], { cwd: repoPath, detached: true, stdio: 'ignore' });
+        ch.on('error', () => {});
+        ch.unref();
+        break;
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function openWithApp(repoPath, appName, linuxCommand = null) {
+  try {
+    if (process.platform === 'darwin') {
+      await execFileP('open', ['-a', appName, repoPath]);
+      return { ok: true };
+    }
+
+    if (process.platform === 'win32') {
+      const child = spawn('cmd.exe', ['/c', 'start', '', appName, repoPath], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      return { ok: true };
+    }
+
+    if (!linuxCommand) {
+      return { ok: false, error: `${appName} is not supported on this platform` };
+    }
+
+    const child = spawn(linuxCommand, [repoPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function openProjectTarget(repoPath, target) {
+  switch (target) {
+    case 'terminal':
+      return await openInTerminal(repoPath);
+    case 'finder':
+      return await openInFileManager(repoPath);
+    case 'vscode':
+      return await openWithApp(repoPath, 'Visual Studio Code', 'code');
+    case 'sourcetree':
+      return await openWithApp(repoPath, 'Sourcetree');
+    case 'antigravity':
+      return await openWithApp(repoPath, 'Antigravity');
+    default:
+      return { ok: false, error: `Unknown open target: ${target}` };
+  }
 }
 
 function configPath() {
@@ -234,7 +494,13 @@ ipcMain.handle('fetch', async (event, repoPath) => {
 ipcMain.handle('git-status', async (_, repoPath) => {
   // Porcelain output is one line per changed file (staged, unstaged, or untracked).
   const res = await runGit(['status', '--porcelain'], repoPath);
-  if (!res.ok) return { ok: false, error: res.stderr };
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: res.errorSummary || res.stderr,
+      rawError: res.errorRaw || combinedGitOutput(res.stdout, res.stderr),
+    };
+  }
   const lines = res.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
   return { ok: true, changedCount: lines.length, changes: lines };
 });
@@ -280,28 +546,11 @@ ipcMain.handle('get-platform', () => process.platform);
 ipcMain.handle('get-homedir', () => require('node:os').homedir());
 
 ipcMain.handle('open-terminal', (_, repoPath) => {
-  try {
-    if (process.platform === 'win32') {
-      // `start cmd.exe` opens a new window; inherits cwd → lands in repoPath
-      const child = spawn('cmd.exe', ['/c', 'start', 'cmd.exe'], {
-        cwd: repoPath, detached: true, stdio: 'ignore',
-      });
-      child.unref();
-    } else if (process.platform === 'darwin') {
-      execFile('open', ['-a', 'Terminal', repoPath]);
-    } else {
-      // Linux: try common emulators in order
-      for (const t of ['gnome-terminal', 'konsole', 'xfce4-terminal', 'x-terminal-emulator', 'xterm']) {
-        const ch = spawn(t, [], { cwd: repoPath, detached: true, stdio: 'ignore' });
-        ch.on('error', () => {}); // suppress ENOENT for missing emulators
-        ch.unref();
-        break; // spawn doesn't throw synchronously; first attempt wins
-      }
-    }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return openInTerminal(repoPath);
+});
+
+ipcMain.handle('open-with', async (_, repoPath, target) => {
+  return await openProjectTarget(repoPath, target);
 });
 
 ipcMain.handle('window-minimize', (e) => {

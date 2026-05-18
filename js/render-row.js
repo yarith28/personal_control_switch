@@ -1,15 +1,58 @@
 import { state, findProjectByPath, findFolderById, findLocation, removeItem } from './state.js';
 import { projectsEl } from './dom.js';
 import { basename, displayPath, positionDropdown } from './util.js';
-import { log } from './log.js';
+import { log, logDetails } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
 import { doPull, doPush, doQuickCommit, removeProject, updateBatchButtons } from './actions.js';
 import { renderProjects } from './render-list.js';
 
+function openTargetsForPlatform() {
+  const isMac = document.body.classList.contains('platform-darwin');
+  const isWindows = document.body.classList.contains('platform-win32');
+
+  return [
+    { id: 'terminal', label: 'Terminal' },
+    { id: 'vscode', label: 'VS Code' },
+    { id: 'sourcetree', label: 'SourceTree' },
+    { id: 'antigravity', label: 'Antigravity' },
+    { id: 'finder', label: isMac ? 'Finder' : (isWindows ? 'Explorer' : 'Folder') },
+  ];
+}
+
+function rawGitOutput(result) {
+  return String(
+    result?.errorRaw
+    || [result?.stderr || '', result?.stdout || ''].filter(Boolean).join('\n')
+  ).trim();
+}
+
+function logGitFailure(projectName, failureLabel, result) {
+  const summary = result?.errorSummary
+    ? `[${projectName}] ${failureLabel}: ${result.errorSummary}`
+    : `[${projectName}] ${failureLabel}`;
+  const details = rawGitOutput(result);
+
+  if (!details) {
+    log(summary, true);
+    return;
+  }
+
+  logDetails(summary, details, {
+    append: true,
+    detailsLabel: 'Show raw Git output',
+  });
+}
+
+const PIN_ICON = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+  <path d="M4.35 1.9H8.65V4.2L10.1 5.95V7.05H7.2V10.9L6.5 10.15L5.8 10.9V7.05H2.9V5.95L4.35 4.2V1.9Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+  <path d="M4.35 4.25H8.65" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+</svg>`;
+
 export function renderRow(project, parentFolder = null) {
   const row = document.createElement('div');
   row.className = 'project-row';
+  row.classList.toggle('pinned-row', !!project.pinned);
   row.dataset.path = project.path;
 
   // drag handle
@@ -45,14 +88,7 @@ export function renderRow(project, parentFolder = null) {
   const nameText = document.createElement('span');
   nameText.className = 'name-text';
   nameText.textContent = basename(project.path);
-  nameText.title = 'Open terminal here';
-  nameText.addEventListener('click', async (e) => {
-    if (state.organizeMode || state.multiSelect) return;
-    if (row.classList.contains('busy')) return;
-    e.stopPropagation();
-    const res = await window.api.openTerminal(project.path);
-    if (!res.ok) log(`[${basename(project.path)}] failed to open terminal: ${res.error}`);
-  });
+  nameText.title = 'Open with...';
   const nameBranch = document.createElement('span');
   nameBranch.className = 'name-branch';
   nameBranch.textContent = project.current || '';
@@ -72,6 +108,41 @@ export function renderRow(project, parentFolder = null) {
 
   const closeDropdown = () => branchDropdown.classList.remove('open');
 
+  const openDropdown = document.createElement('div');
+  openDropdown.className = 'move-dropdown';
+  document.body.appendChild(openDropdown);
+
+  const closeOpenDropdown = () => openDropdown.classList.remove('open');
+
+  nameText.addEventListener('click', (e) => {
+    if (state.organizeMode || state.multiSelect) return;
+    if (row.classList.contains('busy')) return;
+
+    e.stopPropagation();
+    const isOpen = openDropdown.classList.contains('open');
+    document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open').forEach((d) => d.classList.remove('open'));
+    if (isOpen) return;
+
+    openDropdown.innerHTML = '';
+    for (const target of openTargetsForPlatform()) {
+      const option = document.createElement('div');
+      option.className = 'move-option';
+      option.textContent = target.label;
+      option.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        closeOpenDropdown();
+        const res = await window.api.openWith(project.path, target.id);
+        if (!res.ok) {
+          log(`[${basename(project.path)}] failed to open in ${target.label}: ${res.error}`, true);
+        }
+      });
+      openDropdown.appendChild(option);
+    }
+
+    openDropdown.classList.add('open');
+    positionDropdown(openDropdown, nameText.getBoundingClientRect());
+  });
+
   if (project.branches) {
     for (const b of project.branches) {
       const opt = document.createElement('div');
@@ -82,6 +153,7 @@ export function renderRow(project, parentFolder = null) {
         closeDropdown();
         if (b === project.current) return;
         setRowBusy(project, true);
+        setRowStatus(project, `Switching to ${b}...`);
         log(`[${basename(project.path)}] checking out ${b}...`);
         const res = await window.api.checkout(project.path, b);
         if (res.ok) {
@@ -92,7 +164,7 @@ export function renderRow(project, parentFolder = null) {
           );
           log(`[${basename(project.path)}] switched to ${b}`, true);
         } else {
-          log(`[${basename(project.path)}] checkout failed: ${res.stderr.trim()}`, true);
+          logGitFailure(basename(project.path), 'checkout failed', res);
           await refreshBranches(project);
         }
         setRowBusy(project, false);
@@ -115,6 +187,18 @@ export function renderRow(project, parentFolder = null) {
 
   const btnRow = document.createElement('div');
   btnRow.className = 'btn-row';
+
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'pin-toggle project-pin-btn' + (project.pinned ? ' active' : '');
+  pinBtn.title = project.pinned ? 'Unpin project' : 'Pin project to top';
+  pinBtn.setAttribute('aria-pressed', String(!!project.pinned));
+  pinBtn.innerHTML = PIN_ICON;
+  pinBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    project.pinned = !project.pinned;
+    await persist();
+    renderProjects();
+  });
 
   const pullBtn = document.createElement('button');
   pullBtn.className = 'btn btn-pull';
@@ -273,6 +357,7 @@ const moveBtn = document.createElement('button');
   row.appendChild(checkboxLabel);
   row.appendChild(info);
   row.appendChild(btnRow);
+  if (state.organizeMode) row.appendChild(pinBtn);
   row.appendChild(moveBtn);
   row.appendChild(removeBtn);
 
@@ -294,6 +379,10 @@ const moveBtn = document.createElement('button');
 export function setRowBusy(project, busy) {
   if (!project) return;
   project.busy = busy;
+  if (!busy) {
+    project.statusText = '';
+    project.statusWarning = false;
+  }
   const row = projectsEl.querySelector(
     `.project-row[data-path="${CSS.escape(project.path)}"]`
   );
@@ -303,4 +392,10 @@ export function setRowBusy(project, busy) {
     if (el.classList.contains('remove')) return;
     el.disabled = busy;
   });
+}
+
+export function setRowStatus(project, text = '', { warning = false } = {}) {
+  if (!project) return;
+  project.statusText = text;
+  project.statusWarning = warning;
 }

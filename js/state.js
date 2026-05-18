@@ -56,3 +56,13 @@ export function removeItem(target) {
   if (!loc) return null;
   return loc.list.splice(loc.index, 1)[0];
 }
+
+export function pinnedFirst(list) {
+  const pinned = [];
+  const unpinned = [];
+  for (const item of list) {
+    if (item?.pinned) pinned.push(item);
+    else unpinned.push(item);
+  }
+  return [...pinned, ...unpinned];
+}

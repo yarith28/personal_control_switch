@@ -10,21 +10,60 @@ function isNearBottom(el, threshold = 24) {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= threshold;
 }
 
-export function log(text, append = false) {
-  const hasContent = output.textContent.length > 0;
+function appendEntry(entry) {
   const shouldStickToBottom = isNearBottom(output) && !hasSelectionInside(output);
+  output.appendChild(entry);
+  if (shouldStickToBottom) output.scrollTop = output.scrollHeight;
+}
 
-  let chunk = '';
-  if (append) {
-    chunk = hasContent ? '\n' + text : text;
-  } else {
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const line = `[${time}] ${text}`;
-    chunk = hasContent ? '\n\n' + line : line;
+function buildLogPrefix(includeTimestamp) {
+  if (!includeTimestamp) return '';
+  const time = new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  return `[${time}] `;
+}
+
+export function log(text, append = false) {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${append ? 'append' : 'event'}`;
+  entry.textContent = buildLogPrefix(!append) + text;
+  appendEntry(entry);
+}
+
+export function logDetails(summary, details, {
+  append = true,
+  detailsLabel = 'Show raw Git output',
+} = {}) {
+  if (!details) {
+    log(summary, append);
+    return;
   }
 
-  output.appendChild(document.createTextNode(chunk));
-  if (shouldStickToBottom) output.scrollTop = output.scrollHeight;
+  const entry = document.createElement('div');
+  entry.className = `log-entry log-entry-detailed ${append ? 'append' : 'event'}`;
+
+  const summaryLine = document.createElement('div');
+  summaryLine.className = 'log-summary';
+  summaryLine.textContent = buildLogPrefix(!append) + summary;
+
+  const detailsEl = document.createElement('details');
+  detailsEl.className = 'log-details';
+
+  const summaryEl = document.createElement('summary');
+  summaryEl.textContent = detailsLabel;
+
+  const raw = document.createElement('pre');
+  raw.className = 'log-raw';
+  raw.textContent = details;
+
+  detailsEl.appendChild(summaryEl);
+  detailsEl.appendChild(raw);
+  entry.appendChild(summaryLine);
+  entry.appendChild(detailsEl);
+  appendEntry(entry);
 }
 
 window.addEventListener('error', (e) => {

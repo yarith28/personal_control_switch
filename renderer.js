@@ -176,6 +176,7 @@ collapseBtn.addEventListener('click', async () => {
   const hydrateProject = (p) => ({
     type: 'project',
     path: p.path,
+    pinned: !!p.pinned,
     selected: false,
     branches: p.branches || null,
     current:  p.current  || null,
@@ -192,6 +193,7 @@ collapseBtn.addEventListener('click', async () => {
           type: 'folder',
           id: entry.id,
           name: entry.name,
+          pinned: !!entry.pinned,
           collapsed: !!entry.collapsed,
           color: entry.color || null,
           items: (entry.items || []).map(hydrateProject),
@@ -209,6 +211,7 @@ collapseBtn.addEventListener('click', async () => {
           type: 'folder',
           id: entry.id,
           name: entry.name,
+          pinned: false,
           collapsed: !!entry.collapsed,
           color: null,
           items: [],

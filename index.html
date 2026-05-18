@@ -107,7 +107,7 @@
       </div>
 
       <div class="output-wrap" id="output-wrap">
-        <pre id="output" class="output"></pre>
+        <div id="output" class="output" role="log" aria-live="polite"></div>
       </div>
     </div>
 
@@ -122,6 +122,8 @@
         </div>
       </div>
     </div>
+
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
     <script type="module" src="renderer.js"></script>
   </body>

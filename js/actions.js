@@ -1,12 +1,134 @@
 import { selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn, fetchAllBtn, projectsEl } from './dom.js';
 import { state, getProjects, removeItem } from './state.js';
 import { basename } from './util.js';
-import { log } from './log.js';
+import { log, logDetails } from './log.js';
+import { showToast } from './notify.js';
 import { persist } from './persist.js';
 import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
-import { setRowBusy } from './render-row.js';
+import { setRowBusy, setRowStatus } from './render-row.js';
 import { confirmDialog, promptDialog } from './modal.js';
+
+const LONG_RUNNING_WARNING_MS = 8000;
+
+function startLongRunningWarning(project, actionLabel) {
+  const projectName = basename(project.path);
+  return window.setTimeout(() => {
+    setRowStatus(project, `Still ${actionLabel}...`, { warning: true });
+    log(
+      `[${projectName}] still ${actionLabel}... this may be waiting on the network, remote hooks, or authentication.`,
+      true
+    );
+  }, LONG_RUNNING_WARNING_MS);
+}
+
+function rawGitOutput(result) {
+  return String(
+    result?.errorRaw
+    || [result?.stderr || '', result?.stdout || ''].filter(Boolean).join('\n')
+  ).trim();
+}
+
+function logGitFailure(projectName, failureLabel, result) {
+  const summary = result?.errorSummary
+    ? `[${projectName}] ${failureLabel}: ${result.errorSummary}`
+    : `[${projectName}] ${failureLabel}`;
+  const details = rawGitOutput(result);
+
+  if (!details) {
+    log(summary, true);
+    return;
+  }
+
+  logDetails(summary, details, {
+    append: true,
+    detailsLabel: 'Show raw Git output',
+  });
+}
+
+function notificationBody(summary, details = '') {
+  if (!details) return summary;
+  const firstLine = String(details).split('\n').map((line) => line.trim()).find(Boolean);
+  if (!firstLine || firstLine === summary) return summary;
+  return `${summary}\n${firstLine}`;
+}
+
+async function notifyUser(title, body = '', { tone = 'default' } = {}) {
+  showToast(title, body, { tone });
+}
+
+function completedActionLabel(opName) {
+  switch (opName) {
+    case 'Fetching':
+      return 'Fetch';
+    case 'Pulling':
+      return 'Pull';
+    case 'Pushing':
+      return 'Push';
+    default:
+      return opName.replace(/ing$/i, '');
+  }
+}
+
+async function runProjectAction(project, {
+  actionLabel,
+  startLabel,
+  successLabel,
+  failureLabel,
+  action,
+  refreshAfter = true,
+  warnLongRunning = false,
+  notifyOnFailure = false,
+}) {
+  const projectName = basename(project.path);
+  setRowBusy(project, true);
+  setRowStatus(project, `${startLabel}...`);
+  log(`[${projectName}] ${actionLabel}...`);
+
+  const warningTimer = warnLongRunning
+    ? startLongRunningWarning(project, actionLabel)
+    : null;
+
+  try {
+    const res = await action(project.path);
+    if (res.ok) {
+      const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
+      log(`[${projectName}] ${successLabel}${detail ? '\n' + detail : ''}`, true);
+    } else {
+      logGitFailure(projectName, failureLabel, res);
+      if (notifyOnFailure) {
+        await notifyUser(
+          `${projectName}: ${failureLabel}`,
+          notificationBody(res.errorSummary || failureLabel, rawGitOutput(res)),
+          { tone: 'error' }
+        );
+      }
+    }
+    return res;
+  } catch (err) {
+    const detail = err?.message || String(err);
+    const failure = {
+      ok: false,
+      stdout: '',
+      stderr: detail,
+      errorSummary: detail,
+      errorRaw: detail,
+    };
+    logGitFailure(projectName, failureLabel, failure);
+    if (notifyOnFailure) {
+      await notifyUser(
+        `${projectName}: ${failureLabel}`,
+        notificationBody(failure.errorSummary || failureLabel, failure.errorRaw),
+        { tone: 'error' }
+      );
+    }
+    return failure;
+  } finally {
+    if (warningTimer) window.clearTimeout(warningTimer);
+    setRowBusy(project, false);
+    if (refreshAfter) await refreshAll({ force: true });
+  }
+}
 
 export function updateBatchButtons() {
   const projects = getProjects();
@@ -38,25 +160,27 @@ export function updateBatchButtons() {
 }
 
 export async function doPull(project) {
-  setRowBusy(project, true);
-  log(`[${basename(project.path)}] pulling...`);
-  const res = await window.api.pull(project.path);
-  const tag = res.ok ? 'pull complete' : 'pull failed';
-  const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
-  log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
-  setRowBusy(project, false);
-  await refreshAll({ force: true });
+  await runProjectAction(project, {
+    actionLabel: 'pulling',
+    startLabel: 'Pulling',
+    successLabel: 'pull complete',
+    failureLabel: 'pull failed',
+    action: (repoPath) => window.api.pull(repoPath),
+    warnLongRunning: true,
+    notifyOnFailure: true,
+  });
 }
 
 export async function doPush(project) {
-  setRowBusy(project, true);
-  log(`[${basename(project.path)}] pushing...`);
-  const res = await window.api.push(project.path);
-  const tag = res.ok ? 'push complete' : 'push failed';
-  const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
-  log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
-  setRowBusy(project, false);
-  await refreshAll({ force: true });
+  await runProjectAction(project, {
+    actionLabel: 'pushing',
+    startLabel: 'Pushing',
+    successLabel: 'push complete',
+    failureLabel: 'push failed',
+    action: (repoPath) => window.api.push(repoPath),
+    warnLongRunning: true,
+    notifyOnFailure: true,
+  });
 }
 
 export async function doQuickCommit(project) {
@@ -64,7 +188,10 @@ export async function doQuickCommit(project) {
   // there's nothing to stage.
   const status = await window.api.gitStatus(project.path);
   if (!status.ok) {
-    log(`[${basename(project.path)}] status failed: ${status.error}`, true);
+    logGitFailure(basename(project.path), 'status failed', {
+      errorSummary: status.error,
+      errorRaw: status.rawError || status.error,
+    });
     return;
   }
   if (status.changedCount === 0) {
@@ -80,14 +207,13 @@ export async function doQuickCommit(project) {
   });
   if (!message) return;
 
-  setRowBusy(project, true);
-  log(`[${basename(project.path)}] committing "${message}"...`);
-  const res = await window.api.commitAll(project.path, message);
-  const tag = res.ok ? 'commit complete' : 'commit failed';
-  const detail = (res.stdout + res.stderr).trim();
-  log(`[${basename(project.path)}] ${tag}${detail ? '\n' + detail : ''}`, true);
-  setRowBusy(project, false);
-  await refreshAll({ force: true });
+  await runProjectAction(project, {
+    actionLabel: `committing "${message}"`,
+    startLabel: 'Committing',
+    successLabel: 'commit complete',
+    failureLabel: 'commit failed',
+    action: (repoPath) => window.api.commitAll(repoPath, message),
+  });
 }
 
 export async function addProject() {
@@ -103,7 +229,7 @@ export async function addProject() {
       continue;
     }
 
-    const project = { type: 'project', path: dir, selected: false };
+    const project = { type: 'project', path: dir, pinned: false, selected: false };
     await refreshBranches(project);
     if (!project.branches) {
       log(`Cannot add ${dir}: ${project.error}`);
@@ -142,18 +268,29 @@ export async function removeProject(project) {
 async function runBatchOp(opName, targets, opFn) {
   if (targets.length === 0) return;
   log(`${opName} ${targets.length} project(s)...`);
+  const baseAction = opName.replace(/ing$/i, '').toLowerCase();
+  let okCount = 0;
+  let failCount = 0;
 
-  // Mark every queued project busy up front so the user can see what's pending.
-  targets.forEach((p) => setRowBusy(p, true));
+  // Mark every queued project so the user can see what is waiting next.
+  targets.forEach((p) => {
+    setRowBusy(p, true);
+    setRowStatus(p, 'Queued...');
+  });
 
   try {
     for (const project of targets) {
-      log(`[${basename(project.path)}] ${opName.toLowerCase()}...`, true);
-      const res = await opFn(project.path);
-      const tag = res.ok ? 'ok' : 'failed';
-      const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
-      log(`[${basename(project.path)}] ${tag}${detail ? ': ' + detail.split('\n')[0] : ''}`, true);
-      setRowBusy(project, false);
+      const res = await runProjectAction(project, {
+        actionLabel: opName.toLowerCase(),
+        startLabel: opName,
+        successLabel: `${baseAction} complete`,
+        failureLabel: `${baseAction} failed`,
+        action: opFn,
+        refreshAfter: false,
+        warnLongRunning: ['Fetching', 'Pulling', 'Pushing'].includes(opName),
+      });
+      if (res?.ok) okCount += 1;
+      else failCount += 1;
     }
   } finally {
     // Safety net in case anything was still flagged busy on early exit
@@ -161,6 +298,14 @@ async function runBatchOp(opName, targets, opFn) {
   }
   await refreshAll({ force: true });
   log(`${opName} done.`, true);
+
+  if (failCount > 0) {
+    const completed = completedActionLabel(opName);
+    const body = `${okCount} succeeded, ${failCount} failed.`;
+    await notifyUser(`${completed} finished`, body, {
+      tone: 'error',
+    });
+  }
 }
 
 export async function fetchAllProjects() {

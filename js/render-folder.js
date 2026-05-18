@@ -6,9 +6,14 @@ import { fetchFolderProjects, updateBatchButtons } from './actions.js';
 import { confirmDialog } from './modal.js';
 import { positionDropdown } from './util.js';
 
+const PIN_ICON = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+  <path d="M4.35 1.9H8.65V4.2L10.1 5.95V7.05H7.2V10.9L6.5 10.15L5.8 10.9V7.05H2.9V5.95L4.35 4.2V1.9Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+  <path d="M4.35 4.25H8.65" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
+</svg>`;
+
 export async function addFolder() {
   const id = 'f' + Date.now();
-  state.items.unshift({ type: 'folder', id, name: 'New Folder', collapsed: false, items: [] });
+  state.items.unshift({ type: 'folder', id, name: 'New Folder', pinned: false, collapsed: false, items: [] });
   await persist();
   renderProjects();
   const nameEl = projectsEl.querySelector(`.group-header[data-id="${id}"] .group-name`);
@@ -50,6 +55,7 @@ export function startRename(nameEl) {
 export function renderFolderHeader(folder) {
   const el = document.createElement('div');
   el.className = 'group-header' + (folder.collapsed && !state.organizeMode ? ' collapsed' : '');
+  el.classList.toggle('pinned-folder', !!folder.pinned);
   el.dataset.id = folder.id;
   if (folder.color) el.style.setProperty('--folder-color', folder.color);
 
@@ -113,6 +119,18 @@ export function renderFolderHeader(folder) {
   });
 
   const fetchableCount = folder.items.filter((p) => p.branches).length;
+
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'pin-toggle folder-pin-toggle' + (folder.pinned ? ' active' : '');
+  pinBtn.title = folder.pinned ? 'Unpin folder' : 'Pin folder to top';
+  pinBtn.setAttribute('aria-pressed', String(!!folder.pinned));
+  pinBtn.innerHTML = PIN_ICON;
+  pinBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    folder.pinned = !folder.pinned;
+    await persist();
+    renderProjects();
+  });
 
   // folder fetch action
   const fetchBtn = document.createElement('button');
@@ -212,6 +230,7 @@ export function renderFolderHeader(folder) {
   el.appendChild(chevron);
   el.appendChild(icon);
   el.appendChild(nameEl);
+  if (state.organizeMode) el.appendChild(pinBtn);
   el.appendChild(fetchBtn);
   el.appendChild(colorBtn);
   el.appendChild(deleteBtn);
@@ -221,6 +240,7 @@ export function renderFolderHeader(folder) {
     if (state.organizeMode) return;
     if (nameEl.contentEditable === 'true') return;
     if (e.target === deleteBtn) return;
+    if (e.target.closest('.pin-toggle')) return;
     if (e.target.closest('.folder-fetch-btn')) return;
     folder.collapsed = !folder.collapsed;
     el.classList.toggle('collapsed', folder.collapsed);

@@ -2,6 +2,7 @@ import { state } from './state.js';
 
 function serializeProject(p) {
   const out = { type: 'project', path: p.path };
+  if (p.pinned) out.pinned = true;
   if (p.branches) out.branches = p.branches;
   if (p.current) out.current = p.current;
   if (typeof p.ahead === 'number')  out.ahead  = p.ahead;
@@ -23,6 +24,7 @@ export async function persist() {
             type: 'folder',
             id: i.id,
             name: i.name,
+            pinned: !!i.pinned,
             collapsed: i.collapsed,
             color: i.color || null,
             items: i.items.map(serializeProject),
