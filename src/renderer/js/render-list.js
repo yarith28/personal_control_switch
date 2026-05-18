@@ -17,7 +17,18 @@ export function renderProjects() {
     return;
   }
 
-  for (const item of pinnedFirst(state.items)) {
+  const sortedTop = pinnedFirst(state.items);
+  let hadPinned = false;
+  let dividerAdded = false;
+  for (const item of sortedTop) {
+    if (item.pinned) {
+      hadPinned = true;
+    } else if (hadPinned && !dividerAdded) {
+      const divider = document.createElement('div');
+      divider.className = 'pinned-divider';
+      projectsEl.appendChild(divider);
+      dividerAdded = true;
+    }
     if (item.type === 'folder') {
       projectsEl.appendChild(renderFolderHeader(item));
       const hideChildren = item.collapsed && !state.organizeMode;

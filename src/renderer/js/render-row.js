@@ -48,15 +48,13 @@ function logGitFailure(projectName, failureLabel, result) {
 export function renderRow(project, parentFolder = null) {
   const row = document.createElement('div');
   row.className = 'project-row';
-  row.classList.toggle('pinned-row', !!project.pinned);
   row.dataset.path = project.path;
+  row.draggable = state.organizeMode;
 
-  // drag handle
+  // drag handle (visual affordance only — drag works from anywhere on the row in organize mode)
   const handle = document.createElement('div');
   handle.className = 'drag-handle';
   handle.innerHTML = dragHandleIconMarkup();
-  handle.addEventListener('mousedown', () => { if (state.organizeMode) row.draggable = true; });
-  row.addEventListener('dragend', () => { row.draggable = false; });
 
   const checkboxLabel = document.createElement('label');
   checkboxLabel.className = 'checkbox-wrap';
@@ -78,6 +76,8 @@ export function renderRow(project, parentFolder = null) {
   info.className = 'info';
   const name = document.createElement('div');
   name.className = 'name';
+  const nameInner = document.createElement('div');
+  nameInner.className = 'name-inner';
   const nameText = document.createElement('span');
   nameText.className = 'name-text';
   nameText.textContent = basename(project.path);
@@ -85,8 +85,9 @@ export function renderRow(project, parentFolder = null) {
   const nameBranch = document.createElement('span');
   nameBranch.className = 'name-branch';
   nameBranch.textContent = project.current || '';
-  name.appendChild(nameText);
-  name.appendChild(nameBranch);
+  nameInner.appendChild(nameText);
+  nameInner.appendChild(nameBranch);
+  name.appendChild(nameInner);
 
   const pinBtn = document.createElement('button');
   pinBtn.className = 'pin-toggle' + (project.pinned ? ' active' : '');
@@ -99,7 +100,13 @@ export function renderRow(project, parentFolder = null) {
     await persist();
     renderProjects();
   });
-  if (state.organizeMode) name.appendChild(pinBtn);
+  if (state.organizeMode) {
+    name.appendChild(pinBtn);
+  } else if (project.pinned) {
+    pinBtn.classList.add('static');
+    pinBtn.classList.remove('active');
+    name.appendChild(pinBtn);
+  }
 
   const fullPath = document.createElement('div');
   fullPath.className = 'path';
@@ -292,7 +299,7 @@ const moveBtn = document.createElement('button');
     setTimeout(() => row.classList.add('dragging'), 0);
   });
   row.addEventListener('dragend', () => {
-    row.draggable = false;
+    row.draggable = state.organizeMode;
     row.classList.remove('dragging');
     document.querySelectorAll('.project-row, .group-header').forEach((r) => r.classList.remove('drag-over'));
   });

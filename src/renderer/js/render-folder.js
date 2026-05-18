@@ -51,15 +51,14 @@ export function startRename(nameEl) {
 export function renderFolderHeader(folder) {
   const el = document.createElement('div');
   el.className = 'group-header' + (folder.collapsed && !state.organizeMode ? ' collapsed' : '');
-  el.classList.toggle('pinned-folder', !!folder.pinned);
   el.dataset.id = folder.id;
   if (folder.color) el.style.setProperty('--folder-color', folder.color);
+  el.draggable = state.organizeMode;
 
-  // drag handle
+  // drag handle (visual affordance only — drag works from anywhere on the folder header in organize mode)
   const handle = document.createElement('div');
   handle.className = 'drag-handle';
   handle.innerHTML = dragHandleIconMarkup();
-  handle.addEventListener('mousedown', () => { if (state.organizeMode) el.draggable = true; });
 
   // batch-select checkbox (visible only in multi-select mode)
   const checkboxLabel = document.createElement('label');
@@ -218,7 +217,13 @@ export function renderFolderHeader(folder) {
   el.appendChild(chevron);
   el.appendChild(icon);
   el.appendChild(nameEl);
-  if (state.organizeMode) el.appendChild(pinBtn);
+  if (state.organizeMode) {
+    el.appendChild(pinBtn);
+  } else if (folder.pinned) {
+    pinBtn.classList.add('static');
+    pinBtn.classList.remove('active');
+    el.appendChild(pinBtn);
+  }
   el.appendChild(fetchBtn);
   el.appendChild(colorBtn);
   el.appendChild(deleteBtn);
@@ -248,7 +253,7 @@ export function renderFolderHeader(folder) {
     setTimeout(() => el.classList.add('dragging'), 0);
   });
   el.addEventListener('dragend', () => {
-    el.draggable = false;
+    el.draggable = state.organizeMode;
     el.classList.remove('dragging');
     document.querySelectorAll('.project-row, .group-header').forEach((r) => r.classList.remove('drag-over'));
   });

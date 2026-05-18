@@ -419,23 +419,23 @@ input[type='checkbox']:disabled + .checkbox-box {
 
 .drag-handle {
   color: var(--text-faint);
-  cursor: grab;
   flex-shrink: 0;
   display: none;
   align-items: center;
   justify-content: center;
-  min-width: 34px;
-  padding: 12px 14px;
-  margin: -12px -10px;
-  border-radius: 12px;
-  transition: background 0.12s ease, color 0.12s ease;
+  pointer-events: none;
 }
-.drag-handle:active { cursor: grabbing; }
 .organize-mode .drag-handle { display: flex; }
-.organize-mode .drag-handle:hover {
-  background: var(--glass-bg-hover);
-  color: var(--text-primary);
-}
+.project-row .drag-handle { margin-inline: -6px; }
+
+/* In organize mode the whole row/folder is draggable, so show grab cursor everywhere on it.
+   Buttons inside keep their own cursor via their explicit rules. */
+.organize-mode .project-row,
+.organize-mode .group-header { cursor: grab; }
+.organize-mode .project-row:active,
+.organize-mode .group-header:active,
+.organize-mode .project-row.dragging,
+.organize-mode .group-header.dragging { cursor: grabbing; }
 
 /* group header */
 .group-header {
@@ -453,13 +453,6 @@ input[type='checkbox']:disabled + .checkbox-box {
   transition: background 0.15s ease;
 }
 .group-header:hover { background: var(--glass-bg-hover); }
-.group-header.pinned-folder {
-  background: color-mix(in srgb, var(--glass-bg) 82%, var(--branch-bg));
-  border-color: color-mix(in srgb, var(--branch-color) 28%, var(--glass-border));
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 0 0 1px color-mix(in srgb, var(--branch-color) 14%, transparent);
-}
 .group-header.dragging { opacity: 0.35; transform: none; }
 .group-header.drag-over { border-color: var(--branch-color); }
 
@@ -511,11 +504,10 @@ input[type='checkbox']:disabled + .checkbox-box {
   flex-shrink: 0;
   -webkit-app-region: no-drag;
 }
-.group-header:hover .group-delete { opacity: 1; }
 .group-delete:hover { background: rgba(220,38,38,0.12); color: #dc2626; }
 /* hide delete in normal mode — only show in edit mode like project remove btn */
 .group-delete { display: none; }
-.organize-mode .group-delete { display: flex; }
+.organize-mode .group-delete { display: flex; opacity: 1; }
 
 /* folder icon */
 .folder-icon {
@@ -654,6 +646,9 @@ input[type='checkbox']:disabled + .checkbox-box {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.pin-toggle.static {
+  pointer-events: none;
+}
 .folder-fetch-btn {
   color: var(--text-muted);
   background: var(--glass-bg-hover);
@@ -723,23 +718,13 @@ input[type='checkbox']:disabled + .checkbox-box {
     inset 0 -1px 0 rgba(0, 0, 0, 0.04);
   transition: transform 0.15s ease, background 0.4s ease;
 }
-.project-row.pinned-row {
-  background: color-mix(in srgb, var(--glass-bg) 86%, var(--branch-bg));
-  border-color: color-mix(in srgb, var(--branch-color) 24%, var(--glass-border));
-  box-shadow:
-    inset 0 1.5px 0 var(--glass-highlight),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.04),
-    0 0 0 1px color-mix(in srgb, var(--branch-color) 12%, transparent);
-}
 .project-row:hover {
   background: var(--glass-bg-hover);
   box-shadow:
     inset 0 1.5px 0 var(--glass-highlight),
     inset 0 -1px 0 rgba(0, 0, 0, 0.04);
 }
-.project-row.pinned-row:hover {
-  background: color-mix(in srgb, var(--glass-bg-hover) 84%, var(--branch-bg));
-}
+.pinned-divider { height: 16px; flex-shrink: 0; }
 .project-row.dragging { opacity: 0.35; transform: none; }
 .project-row.drag-over { border-top-color: var(--branch-color); }
 .project-row.busy { opacity: 0.55; }
@@ -753,12 +738,19 @@ input[type='checkbox']:disabled + .checkbox-box {
 .container.organize-mode .project-row .name-text:hover,
 .container.multi-select .project-row .name-text:hover { color: inherit; }
 .project-row .name {
+  display: flex;
+  align-items: center;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+}
+.project-row .name-inner {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
 }
 .project-row .path {
   font-size: 11px;
