@@ -103,6 +103,20 @@ body {
   user-select: none;
 }
 
+/* Initial-load fade-in: blank canvas while config + theme load,
+   then bg gradient, blobs, and content fade in together. */
+.bg-blob,
+.container {
+  transition: opacity 0.4s ease-out;
+}
+body.app-loading {
+  background: transparent;
+}
+body.app-loading .bg-blob,
+body.app-loading .container {
+  opacity: 0;
+}
+
 /* everything interactive must opt out of drag */
 button, select, input, label, a, pre, details, summary,
 .project-row, .projects, .swatch, .drag-handle, .toast-stack, .toast,
@@ -589,17 +603,19 @@ input[type='checkbox']:disabled + .checkbox-box {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 999px;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  vertical-align: middle;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
   -webkit-app-region: no-drag;
 }
+.project-row .name .pin-toggle { margin-left: 8px; }
 .pin-toggle svg,
 .folder-fetch-btn svg,
 .project-row .btn-row svg,
@@ -638,11 +654,6 @@ input[type='checkbox']:disabled + .checkbox-box {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.folder-pin-toggle {
-  width: 24px;
-  height: 24px;
-}
-
 .folder-fetch-btn {
   color: var(--text-muted);
   background: var(--glass-bg-hover);
@@ -666,6 +677,7 @@ input[type='checkbox']:disabled + .checkbox-box {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.organize-mode .folder-fetch-btn { display: none; }
 
 /* indented project rows inside a folder */
 .group-member {
@@ -840,8 +852,7 @@ input[type='checkbox']:disabled + .checkbox-box {
 .project-row .btn-row { display: flex; gap: 6px; }
 .project-row .btn-pull,
 .project-row .btn-push,
-.project-row .btn-commit,
-.project-row .pin-toggle {
+.project-row .btn-commit {
   width: 28px;
   height: 28px;
   padding: 0;

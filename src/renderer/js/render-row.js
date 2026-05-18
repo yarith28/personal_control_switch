@@ -87,6 +87,20 @@ export function renderRow(project, parentFolder = null) {
   nameBranch.textContent = project.current || '';
   name.appendChild(nameText);
   name.appendChild(nameBranch);
+
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'pin-toggle' + (project.pinned ? ' active' : '');
+  pinBtn.title = project.pinned ? 'Unpin project' : 'Pin project to top';
+  pinBtn.setAttribute('aria-pressed', String(!!project.pinned));
+  pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });
+  pinBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    project.pinned = !project.pinned;
+    await persist();
+    renderProjects();
+  });
+  if (state.organizeMode) name.appendChild(pinBtn);
+
   const fullPath = document.createElement('div');
   fullPath.className = 'path';
   fullPath.textContent = '‎' + displayPath(project.path, state.homedir);
@@ -180,18 +194,6 @@ export function renderRow(project, parentFolder = null) {
 
   const btnRow = document.createElement('div');
   btnRow.className = 'btn-row';
-
-  const pinBtn = document.createElement('button');
-  pinBtn.className = 'pin-toggle project-pin-btn' + (project.pinned ? ' active' : '');
-  pinBtn.title = project.pinned ? 'Unpin project' : 'Pin project to top';
-  pinBtn.setAttribute('aria-pressed', String(!!project.pinned));
-  pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });
-  pinBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    project.pinned = !project.pinned;
-    await persist();
-    renderProjects();
-  });
 
   const pullBtn = document.createElement('button');
   pullBtn.className = 'btn btn-pull';
@@ -340,7 +342,6 @@ const moveBtn = document.createElement('button');
   row.appendChild(checkboxLabel);
   row.appendChild(info);
   row.appendChild(btnRow);
-  if (state.organizeMode) row.appendChild(pinBtn);
   row.appendChild(moveBtn);
   row.appendChild(removeBtn);
 

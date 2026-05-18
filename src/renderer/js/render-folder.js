@@ -114,7 +114,7 @@ export function renderFolderHeader(folder) {
   const fetchableCount = folder.items.filter((p) => p.branches).length;
 
   const pinBtn = document.createElement('button');
-  pinBtn.className = 'pin-toggle folder-pin-toggle' + (folder.pinned ? ' active' : '');
+  pinBtn.className = 'pin-toggle' + (folder.pinned ? ' active' : '');
   pinBtn.title = folder.pinned ? 'Unpin folder' : 'Pin folder to top';
   pinBtn.setAttribute('aria-pressed', String(!!folder.pinned));
   pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });

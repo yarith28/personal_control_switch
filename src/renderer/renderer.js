@@ -158,11 +158,9 @@ collapseBtn.addEventListener('click', async () => {
     await persist();
   });
 
-  if (config.logCollapsed) {
-    outputWrap.classList.add('collapsed');
-  } else {
-    outputToggleBtn?.classList.add('active');
-  }
+  const logCollapsed = config.logCollapsed ?? true;
+  outputWrap.classList.toggle('collapsed', logCollapsed);
+  outputToggleBtn?.classList.toggle('active', !logCollapsed);
 
   // Load + migrate items into the nested tree model.
   //   v1 (oldest): config.projects = [{ path }]
@@ -232,5 +230,10 @@ collapseBtn.addEventListener('click', async () => {
   // so ahead/behind counts are accurate the first time the user looks.
   renderProjects();
   persist();
+
+  requestAnimationFrame(() => {
+    document.body.classList.remove('app-loading');
+  });
+
   triggerStartupRefresh();
 })();
