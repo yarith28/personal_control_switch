@@ -29,13 +29,6 @@ function installApplicationMenu() {
   ]));
 }
 
-// Hot reload in development only (reloads renderer on file changes)
-if (!app.isPackaged) {
-  require('electron-reload')(__dirname, {
-    ignored: /node_modules|\.git|config\.json/,
-  });
-}
-
 const execFileP = promisify(execFile);
 
 function gitEnv() {
@@ -223,7 +216,7 @@ async function createWindow() {
     ...(!isMac ? { titleBarStyle: 'hidden' } : {}),
     backgroundColor: '#ede9fe',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -244,10 +237,14 @@ async function createWindow() {
     win.setWindowButtonVisibility(false);
   }
 
-  win.loadFile('index.html');
+  if (process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL);
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
 }
 
-// Single-instance lock — production only (electron-reload needs to respawn freely in dev)
+// Single-instance lock — production only so local dev reloads stay friction-free.
 if (app.isPackaged) {
   const gotTheLock = app.requestSingleInstanceLock();
   if (!gotTheLock) {

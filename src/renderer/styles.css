@@ -111,6 +111,19 @@ button, select, input, label, a, pre, details, summary,
   user-select: text;
 }
 
+[data-icon],
+.checkbox-check,
+.checkbox-dash,
+.icon-collapse,
+.icon-expand,
+.folder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
 /* blobs */
 .bg-blob {
   position: fixed;
@@ -188,6 +201,12 @@ button, select, input, label, a, pre, details, summary,
 .win-close:active { transform: scale(0.92) rotate(90deg); }
 .win-max:hover  { background: linear-gradient(135deg, #f59e0bcc, #f97316cc); color: white; }
 .win-min:hover  { background: linear-gradient(135deg, #10b981cc, #14b8a6cc); color: white; }
+.win-btn svg { display: block; overflow: visible; }
+.win-btn svg {
+  width: 9px;
+  height: 9px;
+  overflow: hidden;
+}
 
 /* toolbar */
 .toolbar { display: flex; gap: 10px; align-items: center; }
@@ -212,6 +231,14 @@ button, select, input, label, a, pre, details, summary,
 }
 .btn-select-toggle.icon-only { padding: 7px; width: 30px; height: 30px; justify-content: center; }
 #multi-select-btn { margin-left: auto; }
+#collapse-btn .icon-collapse,
+#collapse-btn .icon-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
 #collapse-btn .icon-expand { display: none; }
 #collapse-btn.all-collapsed .icon-collapse { display: none; }
 #collapse-btn.all-collapsed .icon-expand { display: inline; }
@@ -303,6 +330,8 @@ input[type='checkbox'] {
 .checkbox-dash {
   position: absolute;
   opacity: 0;
+  display: block;
+  overflow: hidden;
 }
 
 input[type='checkbox']:checked + .checkbox-box {
@@ -481,6 +510,12 @@ input[type='checkbox']:disabled + .checkbox-box {
   align-items: center;
   flex-shrink: 0;
 }
+.folder-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  overflow: hidden;
+}
 
 /* color picker button (edit mode only) */
 .folder-color-btn {
@@ -564,6 +599,30 @@ input[type='checkbox']:disabled + .checkbox-box {
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
   -webkit-app-region: no-drag;
+}
+.pin-toggle svg,
+.folder-fetch-btn svg,
+.project-row .btn-row svg,
+.btn-move svg,
+.drag-handle svg,
+.btn-select-toggle.icon-only svg {
+  display: block;
+  overflow: hidden;
+}
+.pin-toggle svg,
+.folder-fetch-btn svg,
+.project-row .btn-row svg,
+.btn-move svg {
+  width: 11px;
+  height: 11px;
+}
+.drag-handle svg {
+  width: 12px;
+  height: 12px;
+}
+.btn-select-toggle.icon-only svg {
+  width: 12px;
+  height: 12px;
 }
 .pin-toggle:hover:not(:disabled) {
   background: var(--glass-bg-hover);

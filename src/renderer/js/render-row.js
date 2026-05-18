@@ -5,6 +5,7 @@ import { log, logDetails } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
 import { doPull, doPush, doQuickCommit, removeProject, updateBatchButtons } from './actions.js';
+import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { renderProjects } from './render-list.js';
 
 function openTargetsForPlatform() {
@@ -44,11 +45,6 @@ function logGitFailure(projectName, failureLabel, result) {
   });
 }
 
-const PIN_ICON = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
-  <path d="M4.35 1.9H8.65V4.2L10.1 5.95V7.05H7.2V10.9L6.5 10.15L5.8 10.9V7.05H2.9V5.95L4.35 4.2V1.9Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
-  <path d="M4.35 4.25H8.65" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
-</svg>`;
-
 export function renderRow(project, parentFolder = null) {
   const row = document.createElement('div');
   row.className = 'project-row';
@@ -58,7 +54,7 @@ export function renderRow(project, parentFolder = null) {
   // drag handle
   const handle = document.createElement('div');
   handle.className = 'drag-handle';
-  handle.innerHTML = `<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="4" cy="3" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>`;
+  handle.innerHTML = dragHandleIconMarkup();
   handle.addEventListener('mousedown', () => { if (state.organizeMode) row.draggable = true; });
   row.addEventListener('dragend', () => { row.draggable = false; });
 
@@ -75,10 +71,7 @@ export function renderRow(project, parentFolder = null) {
   });
   checkboxLabel.appendChild(checkbox);
   checkboxLabel.insertAdjacentHTML('beforeend',
-    `<span class="checkbox-box">
-      <svg class="checkbox-check" width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1.5 4L3.5 6.5L8.5 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <svg class="checkbox-dash" width="8" height="2" viewBox="0 0 8 2" fill="none"><line x1="0" y1="1" x2="8" y2="1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-    </span>`
+    `<span class="checkbox-box">${checkboxIconMarkup()}</span>`
   );
 
   const info = document.createElement('div');
@@ -192,7 +185,7 @@ export function renderRow(project, parentFolder = null) {
   pinBtn.className = 'pin-toggle project-pin-btn' + (project.pinned ? ' active' : '');
   pinBtn.title = project.pinned ? 'Unpin project' : 'Pin project to top';
   pinBtn.setAttribute('aria-pressed', String(!!project.pinned));
-  pinBtn.innerHTML = PIN_ICON;
+  pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });
   pinBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     project.pinned = !project.pinned;
@@ -203,10 +196,7 @@ export function renderRow(project, parentFolder = null) {
   const pullBtn = document.createElement('button');
   pullBtn.className = 'btn btn-pull';
   pullBtn.title = 'Pull';
-  pullBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-    <path d="M6.5 2V10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    <path d="M3 6.5L6.5 10L10 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
+  pullBtn.innerHTML = iconHtml('arrowDown', { size: 11, strokeWidth: 1.85 });
   pullBtn.disabled = !project.branches;
   pullBtn.addEventListener('click', () => doPull(project));
   if (project.behind > 0) {
@@ -219,10 +209,7 @@ export function renderRow(project, parentFolder = null) {
   const pushBtn = document.createElement('button');
   pushBtn.className = 'btn btn-push';
   pushBtn.title = 'Push';
-  pushBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-    <path d="M6.5 11V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    <path d="M3 6.5L6.5 3L10 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
+  pushBtn.innerHTML = iconHtml('arrowUp', { size: 11, strokeWidth: 1.85 });
   pushBtn.disabled = !project.branches;
   pushBtn.addEventListener('click', () => doPush(project));
   if (project.ahead > 0) {
@@ -235,11 +222,7 @@ export function renderRow(project, parentFolder = null) {
   const commitBtn = document.createElement('button');
   commitBtn.className = 'btn btn-commit';
   commitBtn.title = 'Quick commit';
-  commitBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-    <line x1="6.5" y1="1" x2="6.5" y2="4.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-    <line x1="6.5" y1="8.8" x2="6.5" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-    <circle cx="6.5" cy="6.5" r="2.3" stroke="currentColor" stroke-width="1.4" fill="none"/>
-  </svg>`;
+  commitBtn.innerHTML = iconHtml('gitCommitVertical', { size: 11, strokeWidth: 1.8 });
   commitBtn.disabled = !project.branches || !project.uncommitted;
   commitBtn.addEventListener('click', () => doQuickCommit(project));
 
@@ -250,7 +233,7 @@ export function renderRow(project, parentFolder = null) {
 const moveBtn = document.createElement('button');
   moveBtn.className = 'btn-move';
   moveBtn.title = 'Move to folder';
-  moveBtn.innerHTML = `<svg width="14" height="13" viewBox="0 0 15 13" fill="none"><path d="M1 2.5C1 1.67 1.67 1 2.5 1H5.5L7 2.5H12.5C13.33 2.5 14 3.17 14 4V10.5C14 11.33 13.33 12 12.5 12H2.5C1.67 12 1 11.33 1 10.5V2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+  moveBtn.innerHTML = iconHtml('folderInput', { size: 11, strokeWidth: 1.8 });
 
   const moveDropdown = document.createElement('div');
   moveDropdown.className = 'move-dropdown';

@@ -21,6 +21,12 @@ npm install
 npm start
 ```
 
+Or explicitly:
+
+```bash
+npm run dev
+```
+
 Or double-click to launch without a terminal:
 
 - **Windows** — double-click `start.bat`
@@ -34,7 +40,7 @@ Packages the app into a proper installer — no Node.js or terminal required to 
 ```bash
 npm run build:win
 ```
-Produces a one-click installer at `dist/Git Sync Setup *.exe`.
+Produces packaged output in `dist/`, including the portable build and unpacked app directory.
 
 **Mac** (run on a Mac):
 ```bash

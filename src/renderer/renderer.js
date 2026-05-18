@@ -12,11 +12,14 @@ import { addProject, batchOp, fetchAllProjects } from './js/actions.js';
 import { addFolder } from './js/render-folder.js';
 import { renderProjects } from './js/render-list.js';
 import { setMultiSelect, setOrganizeMode } from './js/modes.js';
+import { hydrateStaticIcons } from './js/icons.js';
 import { basename } from './js/util.js';
 
 let autoRefreshInitialized = false;
 let startupRefreshTriggered = false;
 let gitProgressSubscribed = false;
+
+hydrateStaticIcons();
 
 function setupAutoRefresh() {
   if (autoRefreshInitialized) return;

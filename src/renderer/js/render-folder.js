@@ -3,13 +3,9 @@ import { projectsEl } from './dom.js';
 import { persist } from './persist.js';
 import { renderProjects, syncCollapseBtn } from './render-list.js';
 import { fetchFolderProjects, updateBatchButtons } from './actions.js';
+import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { confirmDialog } from './modal.js';
 import { positionDropdown } from './util.js';
-
-const PIN_ICON = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
-  <path d="M4.35 1.9H8.65V4.2L10.1 5.95V7.05H7.2V10.9L6.5 10.15L5.8 10.9V7.05H2.9V5.95L4.35 4.2V1.9Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
-  <path d="M4.35 4.25H8.65" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
-</svg>`;
 
 export async function addFolder() {
   const id = 'f' + Date.now();
@@ -62,7 +58,7 @@ export function renderFolderHeader(folder) {
   // drag handle
   const handle = document.createElement('div');
   handle.className = 'drag-handle';
-  handle.innerHTML = `<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="4" cy="3" r="1.5"/><circle cx="8" cy="3" r="1.5"/><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>`;
+  handle.innerHTML = dragHandleIconMarkup();
   handle.addEventListener('mousedown', () => { if (state.organizeMode) el.draggable = true; });
 
   // batch-select checkbox (visible only in multi-select mode)
@@ -73,10 +69,7 @@ export function renderFolderHeader(folder) {
   checkbox.className = 'select';
   checkboxLabel.appendChild(checkbox);
   checkboxLabel.insertAdjacentHTML('beforeend',
-    `<span class="checkbox-box">
-      <svg class="checkbox-check" width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1.5 4L3.5 6.5L8.5 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <svg class="checkbox-dash" width="8" height="2" viewBox="0 0 8 2" fill="none"><line x1="0" y1="1" x2="8" y2="1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-    </span>`
+    `<span class="checkbox-box">${checkboxIconMarkup()}</span>`
   );
   const selectable = folder.items.filter((p) => p.branches);
   checkbox.disabled = selectable.length === 0;
@@ -103,7 +96,7 @@ export function renderFolderHeader(folder) {
   // folder icon
   const icon = document.createElement('span');
   icon.className = 'folder-icon';
-  icon.innerHTML = `<svg width="15" height="13" viewBox="0 0 15 13" fill="none"><path d="M1 2.5C1 1.67157 1.67157 1 2.5 1H5.5L7 2.5H12.5C13.3284 2.5 14 3.17157 14 4V10.5C14 11.3284 13.3284 12 12.5 12H2.5C1.67157 12 1 11.3284 1 10.5V2.5Z" stroke="currentColor" stroke-width="1.2" fill="currentColor" fill-opacity="0.15" stroke-linejoin="round"/></svg>`;
+  icon.innerHTML = iconHtml('folder', { size: 12, strokeWidth: 1.8 });
 
   const chevron = document.createElement('span');
   chevron.className = 'group-chevron';
@@ -124,7 +117,7 @@ export function renderFolderHeader(folder) {
   pinBtn.className = 'pin-toggle folder-pin-toggle' + (folder.pinned ? ' active' : '');
   pinBtn.title = folder.pinned ? 'Unpin folder' : 'Pin folder to top';
   pinBtn.setAttribute('aria-pressed', String(!!folder.pinned));
-  pinBtn.innerHTML = PIN_ICON;
+  pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });
   pinBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     folder.pinned = !folder.pinned;
@@ -135,12 +128,7 @@ export function renderFolderHeader(folder) {
   // folder fetch action
   const fetchBtn = document.createElement('button');
   fetchBtn.className = 'folder-fetch-btn';
-  fetchBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-    <path d="M4 2.25V9.25" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-    <path d="M2.25 4L4 2.25L5.75 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M9 10.75V3.75" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-    <path d="M7.25 9L9 10.75L10.75 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
+  fetchBtn.innerHTML = iconHtml('arrowDownUp', { size: 11, strokeWidth: 1.8 });
   fetchBtn.title = fetchableCount > 0
     ? `Fetch all ${fetchableCount} project${fetchableCount === 1 ? '' : 's'} in this folder`
     : 'No fetchable projects in this folder';
