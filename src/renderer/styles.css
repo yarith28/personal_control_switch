@@ -501,7 +501,7 @@ input[type='checkbox']:disabled + .checkbox-box {
 .group-header.collapsed .group-chevron { transform: rotate(0deg); }
 
 .group-name {
-  flex: 1;
+  flex: 0 1 auto;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-muted);
@@ -514,6 +514,7 @@ input[type='checkbox']:disabled + .checkbox-box {
   outline: none;
   border-radius: 3px;
 }
+.organize-mode .group-name { flex: 1; }
 .group-name[contenteditable='true'] {
   color: var(--text-primary);
   border-bottom: 1.5px solid var(--branch-color);
@@ -641,6 +642,7 @@ input[type='checkbox']:disabled + .checkbox-box {
   -webkit-app-region: no-drag;
 }
 .project-row .name .pin-toggle { margin-left: 8px; }
+.project-row .name .fetch-btn { margin-left: 4px; }
 .pin-toggle svg,
 .folder-fetch-btn svg,
 .project-row .btn-row svg,
@@ -682,30 +684,36 @@ input[type='checkbox']:disabled + .checkbox-box {
 .pin-toggle.static {
   pointer-events: none;
 }
-.folder-fetch-btn {
-  color: var(--text-muted);
-  background: var(--glass-bg-hover);
-  border: 1px solid var(--glass-border);
+.fetch-btn {
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 999px;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  vertical-align: middle;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+  opacity: 0;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
-.folder-fetch-btn:hover:not(:disabled) {
-  background: var(--branch-bg);
-  color: var(--branch-color);
+.fetch-btn:hover:not(:disabled) {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
 }
-.folder-fetch-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.organize-mode .folder-fetch-btn { display: none; }
+.fetch-btn:disabled { cursor: not-allowed; }
+/* reveal on hover of the containing row/folder, while an op is running, or when focused */
+.group-header:hover .fetch-btn,
+.project-row:hover .fetch-btn,
+.fetch-btn.btn-loading,
+.fetch-btn:focus-visible { opacity: 1; }
+.group-header:hover .fetch-btn:disabled,
+.project-row:hover .fetch-btn:disabled { opacity: 0.45; }
+.organize-mode .fetch-btn { display: none; }
 
 /* indented project rows inside a folder */
 .group-member {

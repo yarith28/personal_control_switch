@@ -183,6 +183,17 @@ export async function doPush(project) {
   });
 }
 
+export async function doFetch(project) {
+  await runProjectAction(project, {
+    actionLabel: 'fetching',
+    startLabel: 'Fetching',
+    successLabel: 'fetch complete',
+    failureLabel: 'fetch failed',
+    action: (repoPath) => window.api.fetch(repoPath),
+    warnLongRunning: true,
+  });
+}
+
 export async function doQuickCommit(project) {
   // Sniff working-tree changes first so we don't prompt for a message when
   // there's nothing to stage.

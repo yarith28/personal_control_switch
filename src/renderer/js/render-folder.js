@@ -126,7 +126,7 @@ export function renderFolderHeader(folder) {
 
   // folder fetch action
   const fetchBtn = document.createElement('button');
-  fetchBtn.className = 'folder-fetch-btn';
+  fetchBtn.className = 'fetch-btn';
   fetchBtn.innerHTML = iconHtml('arrowDownUp', { size: 11, strokeWidth: 1.8 });
   fetchBtn.title = fetchableCount > 0
     ? `Fetch all ${fetchableCount} project${fetchableCount === 1 ? '' : 's'} in this folder`
@@ -243,7 +243,7 @@ export function renderFolderHeader(folder) {
     if (nameEl.contentEditable === 'true') return;
     if (e.target === deleteBtn) return;
     if (e.target.closest('.pin-toggle')) return;
-    if (e.target.closest('.folder-fetch-btn')) return;
+    if (e.target.closest('.fetch-btn')) return;
     if (e.target.closest('.folder-color-btn')) return;
     await toggleCollapse();
   });

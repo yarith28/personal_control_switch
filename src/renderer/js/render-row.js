@@ -4,7 +4,7 @@ import { basename, displayPath, positionDropdown, withButtonLoading } from './ut
 import { log, logDetails } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
-import { doPull, doPush, doQuickCommit, removeProject, updateBatchButtons } from './actions.js';
+import { doPull, doPush, doFetch, doQuickCommit, removeProject, updateBatchButtons } from './actions.js';
 import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { renderProjects } from './render-list.js';
 
@@ -107,6 +107,18 @@ export function renderRow(project, parentFolder = null) {
     pinBtn.classList.remove('active');
     name.appendChild(pinBtn);
   }
+
+  const fetchBtn = document.createElement('button');
+  fetchBtn.className = 'fetch-btn';
+  fetchBtn.title = 'Fetch';
+  fetchBtn.innerHTML = iconHtml('arrowDownUp', { size: 11, strokeWidth: 1.8 });
+  fetchBtn.disabled = !project.branches;
+  fetchBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (fetchBtn.disabled) return;
+    withButtonLoading(fetchBtn, () => doFetch(project));
+  });
+  name.appendChild(fetchBtn);
 
   const fullPath = document.createElement('div');
   fullPath.className = 'path';
