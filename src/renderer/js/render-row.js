@@ -1,6 +1,6 @@
 import { state, findProjectByPath, findFolderById, findLocation, removeItem } from './state.js';
 import { projectsEl } from './dom.js';
-import { basename, displayPath, positionDropdown } from './util.js';
+import { basename, displayPath, positionDropdown, withButtonLoading } from './util.js';
 import { log, logDetails } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
@@ -207,7 +207,7 @@ export function renderRow(project, parentFolder = null) {
   pullBtn.title = 'Pull';
   pullBtn.innerHTML = iconHtml('arrowDown', { size: 11, strokeWidth: 1.85 });
   pullBtn.disabled = !project.branches;
-  pullBtn.addEventListener('click', () => doPull(project));
+  pullBtn.addEventListener('click', () => withButtonLoading(pullBtn, () => doPull(project)));
   if (project.behind > 0) {
     const badge = document.createElement('span');
     badge.className = 'btn-badge';
@@ -220,7 +220,7 @@ export function renderRow(project, parentFolder = null) {
   pushBtn.title = 'Push';
   pushBtn.innerHTML = iconHtml('arrowUp', { size: 11, strokeWidth: 1.85 });
   pushBtn.disabled = !project.branches;
-  pushBtn.addEventListener('click', () => doPush(project));
+  pushBtn.addEventListener('click', () => withButtonLoading(pushBtn, () => doPush(project)));
   if (project.ahead > 0) {
     const badge = document.createElement('span');
     badge.className = 'btn-badge';
