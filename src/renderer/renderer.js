@@ -13,7 +13,7 @@ import { addFolder } from './js/render-folder.js';
 import { renderProjects } from './js/render-list.js';
 import { setMultiSelect, setOrganizeMode } from './js/modes.js';
 import { hydrateStaticIcons } from './js/icons.js';
-import { basename } from './js/util.js';
+import { basename, withButtonLoading } from './js/util.js';
 
 let autoRefreshInitialized = false;
 let startupRefreshTriggered = false;
@@ -57,15 +57,17 @@ function subscribeGitProgress() {
 
 // ── Top-level event listeners ───────────────────────────────────────────────
 addBtn.addEventListener('click', addProject);
-fetchAllBtn.addEventListener('click', fetchAllProjects);
+fetchAllBtn.addEventListener('click', () =>
+  withButtonLoading(fetchAllBtn, fetchAllProjects)
+);
 pullSelectedBtn.addEventListener('click', () =>
-  batchOp('Pulling', (p) => window.api.pull(p))
+  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (p) => window.api.pull(p)))
 );
 pushSelectedBtn.addEventListener('click', () =>
-  batchOp('Pushing', (p) => window.api.push(p))
+  withButtonLoading(pushSelectedBtn, () => batchOp('Pushing', (p) => window.api.push(p)))
 );
 fetchSelectedBtn.addEventListener('click', () =>
-  batchOp('Fetching', (p) => window.api.fetch(p))
+  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (p) => window.api.fetch(p)))
 );
 selectAll.addEventListener('change', () => {
   const checked = selectAll.checked;
@@ -155,6 +157,20 @@ collapseBtn.addEventListener('click', async () => {
   compactToggle?.addEventListener('click', async (e) => {
     e.stopPropagation();
     applyCompactMode(!state.compactMode);
+    await persist();
+  });
+
+  // Burst mode: when on, batch ops run in parallel instead of sequentially
+  const burstToggle = document.getElementById('burst-toggle');
+  const applyBurstMode = (on) => {
+    state.burstMode = on;
+    burstToggle?.classList.toggle('active', on);
+    burstToggle?.setAttribute('aria-pressed', String(on));
+  };
+  applyBurstMode(!!config.burst);
+  burstToggle?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    applyBurstMode(!state.burstMode);
     await persist();
   });
 

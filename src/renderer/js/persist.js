@@ -17,6 +17,7 @@ export async function persist() {
     theme: state.currentTheme.id,
     font: state.currentFont?.id || 'system',
     compact: !!state.compactMode,
+    burst: !!state.burstMode,
     logCollapsed: outputWrap?.classList.contains('collapsed') ?? false,
     items: state.items.map((i) =>
       i.type === 'folder'

@@ -1,3 +1,25 @@
+// Append a 3-dot jumping loader element to a button (idempotent).
+// Pair with the `.btn-loading` class to overlay the button content while async work runs.
+function ensureDotsLoader(btn) {
+  if (btn.querySelector(':scope > .dots-loader')) return;
+  const loader = document.createElement('span');
+  loader.className = 'dots-loader';
+  loader.innerHTML = '<span></span><span></span><span></span>';
+  btn.appendChild(loader);
+}
+
+export async function withButtonLoading(btn, fn) {
+  if (!btn) return fn();
+  if (btn.classList.contains('btn-loading')) return;
+  ensureDotsLoader(btn);
+  btn.classList.add('btn-loading');
+  try {
+    return await fn();
+  } finally {
+    btn.classList.remove('btn-loading');
+  }
+}
+
 export function basename(p) {
   const parts = p.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || p;

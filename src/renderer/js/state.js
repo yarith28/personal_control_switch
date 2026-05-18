@@ -6,6 +6,7 @@ export const state = {
   currentTheme: null,
   currentFont: null,
   compactMode: false,
+  burstMode: false,
   homedir: null,
 };
 

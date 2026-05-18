@@ -279,18 +279,27 @@ async function runBatchOp(opName, targets, opFn) {
   });
 
   try {
-    for (const project of targets) {
-      const res = await runProjectAction(project, {
-        actionLabel: opName.toLowerCase(),
-        startLabel: opName,
-        successLabel: `${baseAction} complete`,
-        failureLabel: `${baseAction} failed`,
-        action: opFn,
-        refreshAfter: false,
-        warnLongRunning: ['Fetching', 'Pulling', 'Pushing'].includes(opName),
-      });
-      if (res?.ok) okCount += 1;
-      else failCount += 1;
+    const projectOpts = {
+      actionLabel: opName.toLowerCase(),
+      startLabel: opName,
+      successLabel: `${baseAction} complete`,
+      failureLabel: `${baseAction} failed`,
+      action: opFn,
+      refreshAfter: false,
+      warnLongRunning: ['Fetching', 'Pulling', 'Pushing'].includes(opName),
+    };
+    if (state.burstMode) {
+      const results = await Promise.all(targets.map((p) => runProjectAction(p, projectOpts)));
+      for (const res of results) {
+        if (res?.ok) okCount += 1;
+        else failCount += 1;
+      }
+    } else {
+      for (const project of targets) {
+        const res = await runProjectAction(project, projectOpts);
+        if (res?.ok) okCount += 1;
+        else failCount += 1;
+      }
     }
   } finally {
     // Safety net in case anything was still flagged busy on early exit

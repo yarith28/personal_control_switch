@@ -31,7 +31,7 @@ export function renderProjects() {
     }
     if (item.type === 'folder') {
       projectsEl.appendChild(renderFolderHeader(item));
-      const hideChildren = item.collapsed && !state.organizeMode;
+      const hideChildren = item.collapsed;
       for (const child of pinnedFirst(item.items)) {
         const rowEl = renderRow(child, item);
         rowEl.classList.add('group-member');

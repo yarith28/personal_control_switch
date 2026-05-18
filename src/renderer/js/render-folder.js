@@ -5,7 +5,7 @@ import { renderProjects, syncCollapseBtn } from './render-list.js';
 import { fetchFolderProjects, updateBatchButtons } from './actions.js';
 import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { confirmDialog } from './modal.js';
-import { positionDropdown } from './util.js';
+import { positionDropdown, withButtonLoading } from './util.js';
 
 export async function addFolder() {
   const id = 'f' + Date.now();
@@ -50,7 +50,7 @@ export function startRename(nameEl) {
 
 export function renderFolderHeader(folder) {
   const el = document.createElement('div');
-  el.className = 'group-header' + (folder.collapsed && !state.organizeMode ? ' collapsed' : '');
+  el.className = 'group-header' + (folder.collapsed ? ' collapsed' : '');
   el.dataset.id = folder.id;
   if (folder.color) el.style.setProperty('--folder-color', folder.color);
   el.draggable = state.organizeMode;
@@ -135,12 +135,7 @@ export function renderFolderHeader(folder) {
   fetchBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (fetchBtn.disabled) return;
-    fetchBtn.disabled = true;
-    try {
-      await fetchFolderProjects(folder);
-    } finally {
-      fetchBtn.disabled = false;
-    }
+    await withButtonLoading(fetchBtn, () => fetchFolderProjects(folder));
   });
 
   // color marker (edit mode only)
@@ -228,13 +223,7 @@ export function renderFolderHeader(folder) {
   el.appendChild(colorBtn);
   el.appendChild(deleteBtn);
 
-  // collapse toggle (normal mode only) — update in-place so the chevron transition fires
-  el.addEventListener('click', async (e) => {
-    if (state.organizeMode) return;
-    if (nameEl.contentEditable === 'true') return;
-    if (e.target === deleteBtn) return;
-    if (e.target.closest('.pin-toggle')) return;
-    if (e.target.closest('.folder-fetch-btn')) return;
+  const toggleCollapse = async () => {
     folder.collapsed = !folder.collapsed;
     el.classList.toggle('collapsed', folder.collapsed);
     let sibling = el.nextElementSibling;
@@ -244,10 +233,28 @@ export function renderFolderHeader(folder) {
     }
     syncCollapseBtn();
     await persist();
+  };
+
+  // Clicking anywhere on the header (except the inline buttons) toggles collapse,
+  // in both normal and organize mode. The header is also draggable in organize
+  // mode — a pure click (no mouse movement) still fires a click event because
+  // the browser only starts a drag once the pointer moves past a threshold.
+  el.addEventListener('click', async (e) => {
+    if (nameEl.contentEditable === 'true') return;
+    if (e.target === deleteBtn) return;
+    if (e.target.closest('.pin-toggle')) return;
+    if (e.target.closest('.folder-fetch-btn')) return;
+    if (e.target.closest('.folder-color-btn')) return;
+    await toggleCollapse();
   });
 
   // ── Folder drag-and-drop ─────────────────────────────────────────────────
   el.addEventListener('dragstart', (e) => {
+    // Chevron is the collapse hit-target in organize mode; let it click cleanly.
+    if (e.target.closest('.group-chevron')) {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', 'FOLDER:' + folder.id);
     setTimeout(() => el.classList.add('dragging'), 0);

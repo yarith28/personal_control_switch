@@ -117,6 +117,39 @@ body.app-loading .container {
   opacity: 0;
 }
 
+/* 3-dot jumping loader, used as an overlay on buttons during async ops */
+.dots-loader {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  pointer-events: none;
+}
+.dots-loader span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: dot-jump 0.9s ease-in-out infinite;
+}
+.dots-loader span:nth-child(2) { animation-delay: 0.15s; }
+.dots-loader span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dot-jump {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+.btn-loading {
+  position: relative;
+  pointer-events: none;
+  font-size: 0;
+}
+.btn-loading > svg,
+.btn-loading > [data-icon],
+.btn-loading > .btn-badge { visibility: hidden; }
+.btn-loading .dots-loader { display: flex; }
+
 /* everything interactive must opt out of drag */
 button, select, input, label, a, pre, details, summary,
 .project-row, .projects, .swatch, .drag-handle, .toast-stack, .toast,
@@ -210,9 +243,9 @@ button, select, input, label, a, pre, details, summary,
   padding: 0;
 }
 .win-btn:hover { background: rgba(255,255,255,0.45); color: var(--text-primary); transform: scale(1.08); }
-.win-close { transition: background 0.18s ease, color 0.18s ease, transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.win-close:hover { background: linear-gradient(135deg, #ef4444cc, #ec4899cc); color: white; transform: scale(1.15) rotate(90deg); }
-.win-close:active { transform: scale(0.92) rotate(90deg); }
+.win-close { transition: background 0.18s ease, color 0.18s ease; }
+.win-close:hover { background: linear-gradient(135deg, #ef4444cc, #ec4899cc); color: white; }
+.win-close:active { transform: none; }
 .win-max:hover  { background: linear-gradient(135deg, #f59e0bcc, #f97316cc); color: white; }
 .win-min:hover  { background: linear-gradient(135deg, #10b981cc, #14b8a6cc); color: white; }
 .win-btn svg { display: block; overflow: visible; }
@@ -255,7 +288,7 @@ button, select, input, label, a, pre, details, summary,
 }
 #collapse-btn .icon-expand { display: none; }
 #collapse-btn.all-collapsed .icon-collapse { display: none; }
-#collapse-btn.all-collapsed .icon-expand { display: inline; }
+#collapse-btn.all-collapsed .icon-expand { display: inline-flex; }
 .btn-select-toggle:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
 .btn-select-toggle:disabled {
   opacity: 0.45;
@@ -933,7 +966,7 @@ input[type='checkbox']:disabled + .checkbox-box {
 }
 .remove { display: none; }
 .organize-mode .remove { display: flex; }
-.organize-mode .remove:hover:not(:disabled) { background: rgba(220,38,38,0.12); color: #dc2626; transform: rotate(90deg); }
+.organize-mode .remove:hover:not(:disabled) { background: rgba(220,38,38,0.12); color: #dc2626; }
 
 /* edit mode hides per-row actions */
 .organize-mode .project-row .branch-wrap,
