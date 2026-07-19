@@ -24,7 +24,7 @@ export const THEMES = [
       '--bg-gradient': 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
       '--blob1': '#312e81', '--blob2': '#1e3a5f', '--blob3': '#4c1d95',
       '--title-gradient': 'linear-gradient(135deg, #818cf8, #a78bfa, #c4b5fd)',
-      '--text-primary': '#e2e8f0', '--text-muted': '#94a3b8', '--text-faint': '#64748b',
+      '--text-primary': '#e2e8f0', '--text-muted': '#94a3b8', '--text-faint': '#a0abc0',
       '--glass-bg': 'rgba(255,255,255,0.08)', '--glass-bg-hover': 'rgba(255,255,255,0.14)',
       '--glass-border': 'rgba(255,255,255,0.15)', '--glass-highlight': 'rgba(255,255,255,0.14)',
       '--glass-shadow': 'rgba(0,0,0,0.4)', '--surface': 'rgba(255,255,255,0.09)',

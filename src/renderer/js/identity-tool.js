@@ -6,7 +6,11 @@ import { confirmDialog } from './modal.js';
 
 let root = null;
 let preferredProjectPath = '';
-let projectSelect = null;
+let projectList = null;
+let projectCount = null;
+let projectFilterControl = null;
+let projectEditorName = null;
+let projectEditorPath = null;
 let globalNameInput = null;
 let globalEmailInput = null;
 let globalSaveButton = null;
@@ -26,6 +30,10 @@ let projectBusy = false;
 let projectLoading = false;
 let globalRequest = 0;
 let projectRequest = 0;
+let projectMarkerRequest = 0;
+let projectMarkers = new Map();
+let projectMarkersLoading = false;
+let projectFilter = 'all';
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -49,26 +57,144 @@ function availableProjects() {
   return getProjects().filter((project) => project.path && !project.missing);
 }
 
-function projectOptionLabel(project) {
-  return `${basename(project.path)} — ${displayPath(project.path, state.homedir)}`;
+function syncProjectEditorContext() {
+  const project = availableProjects().find((item) => item.path === preferredProjectPath);
+  projectEditorName.textContent = project ? basename(project.path) : 'No project selected';
+  projectEditorPath.textContent = project
+    ? displayPath(project.path, state.homedir)
+    : 'Add a project in Git Sync to configure its identity.';
+}
+
+function markerForIdentity(result) {
+  if (!result?.ok) return '';
+  if (result.hasNameOverride && result.hasEmailOverride) return 'set';
+  if (result.hasNameOverride || result.hasEmailOverride) return 'partial';
+  return 'unset';
+}
+
+function updateProjectMarker(repoPath, result) {
+  const marker = markerForIdentity(result);
+  if (marker) projectMarkers.set(repoPath, marker);
+  else projectMarkers.delete(repoPath);
+  renderProjectList();
+}
+
+async function refreshProjectMarkers() {
+  const projects = availableProjects();
+  const request = ++projectMarkerRequest;
+  const markers = new Map();
+  let nextIndex = 0;
+  projectMarkersLoading = true;
+  renderProjectList();
+
+  async function worker() {
+    while (nextIndex < projects.length) {
+      const project = projects[nextIndex++];
+      let result;
+      try {
+        result = await window.api.identityGet('project', project.path);
+      } catch {
+        result = null;
+      }
+      if (request !== projectMarkerRequest) return;
+      const marker = markerForIdentity(result);
+      if (marker) markers.set(project.path, marker);
+    }
+  }
+
+  const workerCount = Math.min(4, projects.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (request !== projectMarkerRequest) return;
+  projectMarkersLoading = false;
+  projectMarkers = markers;
+  renderProjectList();
+  syncProjectControls();
+}
+
+function setProjectFilter(filter) {
+  if (!['all', 'set', 'unset'].includes(filter) || filter === projectFilter) return;
+  projectFilter = filter;
+  projectFilterControl.querySelectorAll('.identity-project-filter-button').forEach((button) => {
+    const active = button.dataset.filter === filter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  renderProjectList();
+  syncProjectControls();
+}
+
+function renderProjectList() {
+  const allProjects = availableProjects();
+  const projects = allProjects.filter((project) => {
+    if (projectFilter === 'all') return true;
+    const marker = projectMarkers.get(project.path);
+    if (projectFilter === 'set') return marker === 'set';
+    return marker === 'unset' || marker === 'partial';
+  });
+  projectCount.textContent = String(projects.length);
+  projectCount.title = projectFilter === 'all'
+    ? `${allProjects.length} projects`
+    : `${projects.length} of ${allProjects.length} projects`;
+  if (!allProjects.length) {
+    projectList.replaceChildren(el('div', {
+      class: 'identity-project-list-state',
+      text: 'No projects available.',
+    }));
+    return;
+  }
+  if (!projects.length) {
+    const emptyText = projectMarkersLoading
+      ? 'Checking project identities…'
+      : projectFilter === 'set'
+        ? 'No projects have a set identity.'
+        : 'No unset projects.';
+    projectList.replaceChildren(el('div', {
+      class: 'identity-project-list-state',
+      text: emptyText,
+    }));
+    return;
+  }
+
+  projectList.replaceChildren(...projects.map((project) => {
+    const selected = project.path === preferredProjectPath;
+    const marker = projectMarkers.get(project.path);
+    return el('button', {
+      class: `identity-project-item${selected ? ' active' : ''}`,
+      type: 'button',
+      title: project.path,
+      'aria-pressed': String(selected),
+      disabled: projectBusy || projectLoading,
+      onclick: () => selectProject(project.path),
+    }, [
+      el('span', { class: 'identity-project-item-heading' }, [
+        el('span', { class: 'identity-project-item-name', text: basename(project.path) }),
+        marker ? el('span', {
+          class: `identity-project-item-marker${marker === 'partial' ? ' partial' : ''}`,
+          text: marker === 'partial' ? 'Partial' : 'Set',
+          title: marker === 'partial'
+            ? 'Project identity is partially set'
+            : 'Project identity is set',
+        }) : null,
+      ]),
+      el('span', {
+        class: 'identity-project-item-path',
+        text: displayPath(project.path, state.homedir),
+      }),
+    ]);
+  }));
 }
 
 function populateProjects() {
-  const previous = projectSelect?.value || preferredProjectPath;
   const projects = availableProjects();
-  projectSelect.replaceChildren(
-    ...projects.map((project) => el('option', {
-      value: project.path,
-      text: projectOptionLabel(project),
-      selected: project.path === previous,
-    }))
+  const paths = new Set(projects.map((project) => project.path));
+  projectMarkers = new Map(
+    Array.from(projectMarkers).filter(([repoPath]) => paths.has(repoPath))
   );
-  if (previous && projects.some((project) => project.path === previous)) {
-    projectSelect.value = previous;
+  if (!projects.some((project) => project.path === preferredProjectPath)) {
+    preferredProjectPath = projects[0]?.path || '';
   }
-  if (!projectSelect.value && projects[0]) projectSelect.value = projects[0].path;
-  preferredProjectPath = projectSelect.value;
-  projectSelect.disabled = projects.length === 0 || projectBusy || projectLoading;
+  renderProjectList();
+  syncProjectEditorContext();
 }
 
 function conventionalEmail(value) {
@@ -117,7 +243,7 @@ function syncGlobalControls() {
   globalNameInput.disabled = globalBusy || globalLoading;
   globalEmailInput.disabled = globalBusy || globalLoading;
   globalSaveButton.disabled = globalBusy || globalLoading || !name || !email || !globalChanged();
-  globalSaveButton.textContent = globalBusy ? 'Saving…' : 'Update global';
+  globalSaveButton.textContent = globalBusy ? 'Saving…' : 'Update';
   globalValidation.textContent = email && !conventionalEmail(email)
     ? 'This email format is unusual, but Git will accept it.'
     : '';
@@ -125,10 +251,12 @@ function syncGlobalControls() {
 }
 
 function syncProjectControls() {
-  const hasProject = Boolean(projectSelect.value);
+  const hasProject = Boolean(preferredProjectPath);
   const name = projectNameInput.value.trim();
   const email = projectEmailInput.value.trim();
-  projectSelect.disabled = projectBusy || projectLoading || availableProjects().length === 0;
+  projectList.querySelectorAll('.identity-project-item').forEach((item) => {
+    item.disabled = projectBusy || projectLoading;
+  });
   projectNameInput.disabled = projectBusy || projectLoading || !hasProject;
   projectEmailInput.disabled = projectNameInput.disabled;
   const needsOverride = loadedProject && !projectHasCompleteOverride();
@@ -201,7 +329,7 @@ async function loadGlobal({ preserveEdits = false } = {}) {
 
 async function loadProject({ preserveEdits = false } = {}) {
   if (preserveEdits && projectChanged()) return;
-  const repoPath = projectSelect.value;
+  const repoPath = preferredProjectPath;
   if (!repoPath) {
     projectRequest += 1;
     projectLoading = false;
@@ -240,6 +368,7 @@ async function loadProject({ preserveEdits = false } = {}) {
   const formName = result.name || result.effectiveName || '';
   const formEmail = result.email || result.effectiveEmail || '';
   loadedProject = { ...result, repoPath, formName, formEmail };
+  updateProjectMarker(repoPath, result);
   projectNameInput.value = formName;
   projectEmailInput.value = formEmail;
   const effective = identityText(result.effectiveName, result.effectiveEmail);
@@ -288,9 +417,11 @@ async function saveGlobalIdentity() {
 
 async function saveProjectIdentity() {
   if (projectSaveButton.disabled || projectBusy) return;
-  const repoPath = projectSelect.value;
+  const repoPath = preferredProjectPath;
   const name = projectNameInput.value.trim();
   const email = projectEmailInput.value.trim();
+  projectMarkerRequest += 1;
+  projectMarkersLoading = false;
   projectBusy = true;
   syncProjectControls();
 
@@ -317,7 +448,7 @@ async function saveProjectIdentity() {
 
 async function clearProjectOverride() {
   if (projectClearButton.disabled || projectBusy) return;
-  const repoPath = projectSelect.value;
+  const repoPath = preferredProjectPath;
   const confirmed = await confirmDialog({
     message: `Remove the identity override for "${basename(repoPath)}"?`,
     detail: 'Future commits in this project will inherit the global or system Git identity.',
@@ -326,6 +457,8 @@ async function clearProjectOverride() {
   });
   if (!confirmed) return;
 
+  projectMarkerRequest += 1;
+  projectMarkersLoading = false;
   projectBusy = true;
   syncProjectControls();
   let result;
@@ -349,8 +482,8 @@ async function clearProjectOverride() {
   await loadProject();
 }
 
-async function selectProject() {
-  const nextProjectPath = projectSelect.value;
+async function selectProject(nextProjectPath) {
+  if (!nextProjectPath || nextProjectPath === preferredProjectPath) return;
   if (projectChanged()) {
     const discard = await confirmDialog({
       message: 'Discard unsaved project identity changes?',
@@ -358,13 +491,11 @@ async function selectProject() {
       confirmText: 'Discard',
       danger: false,
     });
-    if (!discard) {
-      projectSelect.value = loadedProject.repoPath;
-      return;
-    }
+    if (!discard) return;
   }
-  projectSelect.value = nextProjectPath;
   preferredProjectPath = nextProjectPath;
+  renderProjectList();
+  syncProjectEditorContext();
   await savePreference();
   await loadProject();
 }
@@ -386,13 +517,27 @@ function buildShell() {
   globalValidation = el('div', { class: 'identity-validation', hidden: true });
   globalSaveButton = el('button', {
     class: 'btn btn-primary identity-save-button', type: 'submit',
-  }, ['Update global']);
+  }, ['Update']);
 
-  projectSelect = el('select', {
-    class: 'identity-project-select',
-    'aria-label': 'Project identity scope',
-    onchange: selectProject,
+  projectList = el('div', {
+    class: 'identity-project-list',
+    role: 'list',
+    'aria-label': 'Projects',
   });
+  projectCount = el('span', { class: 'identity-project-count', text: '0' });
+  projectFilterControl = el('div', {
+    class: 'identity-project-filters',
+    role: 'group',
+    'aria-label': 'Filter projects by identity status',
+  }, ['all', 'set', 'unset'].map((filter) => el('button', {
+    class: `identity-project-filter-button${filter === projectFilter ? ' active' : ''}`,
+    type: 'button',
+    'data-filter': filter,
+    'aria-pressed': String(filter === projectFilter),
+    onclick: () => setProjectFilter(filter),
+  }, [filter[0].toUpperCase() + filter.slice(1)])));
+  projectEditorName = el('div', { class: 'identity-project-editor-name' });
+  projectEditorPath = el('div', { class: 'identity-project-editor-path' });
   projectNameInput = el('input', {
     class: 'identity-input', type: 'text', autocomplete: 'off',
     placeholder: 'Git user name', 'aria-label': 'Project Git user name', oninput: syncProjectControls,
@@ -426,33 +571,38 @@ function buildShell() {
   ]);
 
   const projectForm = el('form', {
-    class: 'identity-editor-row identity-project-row',
+    class: 'identity-project-editor',
     onsubmit: (event) => { event.preventDefault(); saveProjectIdentity(); },
   }, [
-    el('div', { class: 'identity-row-context identity-project-context' }, [
-      el('div', { class: 'identity-row-title', text: 'Project identity' }),
-      el('label', { class: 'identity-project-control' }, [
-        el('span', { text: 'Project' }),
-        projectSelect,
-      ]),
+    el('div', { class: 'identity-project-editor-head' }, [
+      el('div', { class: 'identity-project-editor-title', text: 'Project identity' }),
+      projectEditorName,
+      projectEditorPath,
     ]),
-    identityField('Name', projectNameInput),
-    identityField('Email', projectEmailInput),
-    el('div', { class: 'identity-row-actions project' }, [projectClearButton, projectSaveButton]),
+    el('div', { class: 'identity-project-fields' }, [
+      identityField('Name', projectNameInput),
+      identityField('Email', projectEmailInput),
+    ]),
     projectValidation,
     projectStatus,
+    el('div', { class: 'identity-project-actions' }, [projectClearButton, projectSaveButton]),
+  ]);
+
+  const projectWorkspace = el('section', { class: 'identity-project-workspace' }, [
+    el('div', { class: 'identity-project-browser' }, [
+      el('div', { class: 'identity-project-list-heading' }, [
+        el('span', { text: 'Projects' }),
+        projectCount,
+      ]),
+      projectFilterControl,
+      projectList,
+    ]),
+    projectForm,
   ]);
 
   root.replaceChildren(
     el('section', { class: 'identity-card' }, [
-      el('div', { class: 'identity-header' }, [
-        el('div', { class: 'identity-title', text: 'Git identity' }),
-        el('div', {
-          class: 'identity-copy',
-          text: 'Manage the default Git author and repository-specific overrides.',
-        }),
-      ]),
-      el('div', { class: 'identity-editors' }, [globalForm, projectForm]),
+      el('div', { class: 'identity-editors' }, [globalForm, projectWorkspace]),
     ])
   );
 }
@@ -467,12 +617,14 @@ export function setupIdentityTool(initialConfig = {}) {
   syncProjectControls();
   loadGlobal();
   loadProject();
+  refreshProjectMarkers();
 
   window.addEventListener('pcs:tab-change', (event) => {
     if (event.detail?.name !== 'identity-tool') return;
-    const previousProject = projectSelect.value;
+    const previousProject = preferredProjectPath;
     populateProjects();
     loadGlobal({ preserveEdits: true });
-    loadProject({ preserveEdits: previousProject === projectSelect.value });
+    loadProject({ preserveEdits: previousProject === preferredProjectPath });
+    refreshProjectMarkers();
   });
 }
