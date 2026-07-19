@@ -4,6 +4,8 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
+const { createGitService, combinedGitOutput } = require('./git-process');
+const { createConfigStore } = require('./config-store');
 
 function installApplicationMenu() {
   if (process.platform !== 'darwin') {
@@ -30,174 +32,15 @@ function installApplicationMenu() {
 }
 
 const execFileP = promisify(execFile);
-
-function gitEnv() {
-  return {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: '0',
-  };
-}
-
-function trimGitText(text) {
-  return String(text || '').trim();
-}
-
-function combinedGitOutput(stdout, stderr) {
-  return [trimGitText(stderr), trimGitText(stdout)].filter(Boolean).join('\n');
-}
-
-function defaultGitErrorSummary(command) {
-  switch (command) {
-    case 'fetch':
-      return 'Fetch failed.';
-    case 'pull':
-      return 'Pull failed.';
-    case 'push':
-      return 'Push failed.';
-    case 'commit':
-      return 'Commit failed.';
-    case 'checkout':
-      return 'Branch switch failed.';
-    case 'status':
-      return 'Git status failed.';
-    case 'add':
-      return 'Staging changes failed.';
-    default:
-      return 'Git command failed.';
-  }
-}
-
-function classifyGitFailure(args, stdout, stderr) {
-  const command = args[0] || 'git';
-  const raw = combinedGitOutput(stdout, stderr);
-  const normalized = raw.toLowerCase();
-  const has = (...patterns) => patterns.some((pattern) => normalized.includes(pattern));
-
-  if (
-    has(
-      'terminal prompts disabled',
-      'could not read username',
-      'could not read password',
-      'authentication failed',
-      'permission denied (publickey)',
-      'permission denied (publickey,password)',
-      'repository not found'
-    )
-  ) {
-    return {
-      summary: 'Authentication failed. Git needed credentials, but this app cannot answer interactive prompts.',
-      raw,
-    };
-  }
-
-  if (
-    has(
-      'could not resolve host',
-      'failed to connect',
-      'connection timed out',
-      'operation timed out',
-      'network is unreachable',
-      'connection refused',
-      'connection reset',
-      'unable to access'
-    )
-  ) {
-    return {
-      summary: 'Could not reach the remote repository. Check your network, VPN, or remote URL.',
-      raw,
-    };
-  }
-
-  if (command === 'push' && has('has no upstream branch', 'no upstream branch')) {
-    return {
-      summary: 'No upstream branch is set for this branch.',
-      raw,
-    };
-  }
-
-  if (
-    command === 'push' &&
-    has(
-      'non-fast-forward',
-      'fetch first',
-      'failed to push some refs',
-      '[rejected]'
-    )
-  ) {
-    return {
-      summary: 'Push was rejected because the remote has newer commits.',
-      raw,
-    };
-  }
-
-  if (
-    command === 'pull' &&
-    has(
-      'automatic merge failed',
-      'merge conflict',
-      'fix conflicts and then commit the result',
-      'you have unmerged paths'
-    )
-  ) {
-    return {
-      summary: 'Pull stopped because Git found merge conflicts that need manual resolution.',
-      raw,
-    };
-  }
-
-  if (
-    (command === 'pull' || command === 'push') &&
-    has('there is no tracking information', 'no upstream configured for branch')
-  ) {
-    return {
-      summary: 'No upstream branch is configured for the current branch.',
-      raw,
-    };
-  }
-
-  if (command === 'commit' && has('nothing to commit', 'no changes added to commit')) {
-    return {
-      summary: 'Nothing to commit.',
-      raw,
-    };
-  }
-
-  if (command === 'checkout' && has('pathspec', 'did not match any file')) {
-    return {
-      summary: 'That branch could not be found locally.',
-      raw,
-    };
-  }
-
-  if (has('not a git repository')) {
-    return {
-      summary: 'This folder is not currently a Git repository.',
-      raw,
-    };
-  }
-
-  if (has('couldn\'t find remote ref', 'remote ref does not exist')) {
-    return {
-      summary: 'The requested remote branch or ref does not exist.',
-      raw,
-    };
-  }
-
-  return {
-    summary: defaultGitErrorSummary(command),
-    raw,
-  };
-}
-
-function finalizeGitResult(args, result) {
-  if (result.ok) return result;
-  const failure = classifyGitFailure(args, result.stdout, result.stderr);
-  return {
-    ...result,
-    errorSummary: failure.summary,
-    errorRaw: failure.raw,
-  };
-}
+const {
+  runGit,
+  runGitWithInput,
+  runGitStreaming,
+  cancelRepoOperations,
+} = createGitService();
+const configStore = createConfigStore({
+  getConfigPath: () => path.join(app.getPath('userData'), 'config.json'),
+});
 
 function debounce(fn, ms) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -277,93 +120,6 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-
-async function runGit(args, cwd) {
-  try {
-    const { stdout, stderr } = await execFileP('git', args, {
-      cwd,
-      env: gitEnv(),
-    });
-    return finalizeGitResult(args, { ok: true, stdout, stderr });
-  } catch (err) {
-    return finalizeGitResult(args, {
-      ok: false,
-      stdout: err.stdout || '',
-      stderr: err.stderr || err.message,
-    });
-  }
-}
-
-async function runGitWithInput(args, cwd, input, envOverrides = {}) {
-  return await new Promise((resolve) => {
-    const child = spawn('git', args, {
-      cwd,
-      env: { ...gitEnv(), ...envOverrides },
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (err) => {
-      resolve(finalizeGitResult(args, {
-        ok: false,
-        stdout,
-        stderr: stderr || err.message,
-      }));
-    });
-    child.on('close', (code) => {
-      resolve(finalizeGitResult(args, { ok: code === 0, stdout, stderr }));
-    });
-    child.stdin.on('error', () => {});
-    child.stdin.end(input);
-  });
-}
-
-async function runGitStreaming(args, cwd, onProgress) {
-  return await new Promise((resolve) => {
-    const child = spawn('git', args, {
-      cwd,
-      env: gitEnv(),
-      windowsHide: true,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      stdout += text;
-      onProgress?.({ stream: 'stdout', text });
-    });
-
-    child.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      stderr += text;
-      onProgress?.({ stream: 'stderr', text });
-    });
-
-    child.on('error', (err) => {
-      resolve(finalizeGitResult(args, {
-        ok: false,
-        stdout,
-        stderr: stderr || err.message,
-        liveOutput: true,
-      }));
-    });
-
-    child.on('close', (code) => {
-      resolve(finalizeGitResult(args, {
-        ok: code === 0,
-        stdout,
-        stderr,
-        liveOutput: true,
-      }));
-    });
-  });
-}
 
 async function openInFileManager(repoPath) {
   if (process.platform === 'win32') {
@@ -450,32 +206,15 @@ async function openProjectTarget(repoPath, target) {
   }
 }
 
-function configPath() {
-  return path.join(app.getPath('userData'), 'config.json');
+function loadConfig(options) {
+  return configStore.load(options);
 }
-
-async function loadConfig() {
-  try {
-    const data = await fs.readFile(configPath(), 'utf8');
-    const parsed = JSON.parse(data);
-    return { ...parsed, projects: Array.isArray(parsed.projects) ? parsed.projects : [] };
-  } catch {
-    return { projects: [] };
-  }
-}
-
-let configMutex = Promise.resolve();
 
 function updateConfig(mutator) {
-  configMutex = configMutex.then(async () => {
-    const cfg = await loadConfig();
-    mutator(cfg);
-    await fs.writeFile(configPath(), JSON.stringify(cfg, null, 2), 'utf8');
-  });
-  return configMutex;
+  return configStore.update(mutator);
 }
 
-ipcMain.handle('load-config', loadConfig);
+ipcMain.handle('load-config', () => loadConfig({ reportRecovery: true }));
 ipcMain.handle('save-config', (_, config) => {
   return updateConfig((cfg) => { Object.assign(cfg, config); });
 });
@@ -594,6 +333,31 @@ ipcMain.handle('checkout', async (_, repoPath, branch) => {
   return await runGit(['checkout', branch], repoPath);
 });
 
+ipcMain.handle('create-branch', async (_, repoPath, branch) => {
+  const name = typeof branch === 'string' ? branch.trim() : '';
+  if (!name) {
+    return { ok: false, errorSummary: 'Enter a branch name.', errorRaw: '' };
+  }
+
+  const validName = await runGit(['check-ref-format', '--branch', name], repoPath);
+  if (!validName.ok) {
+    return {
+      ok: false,
+      errorSummary: 'Enter a valid Git branch name.',
+      errorRaw: validName.errorRaw,
+    };
+  }
+
+  const created = await runGit(['checkout', '-b', name], repoPath);
+  if (
+    !created.ok
+    && String(created.errorRaw || '').toLowerCase().includes('already exists')
+  ) {
+    created.errorSummary = 'A branch with that name already exists.';
+  }
+  return created;
+});
+
 ipcMain.handle('pull', async (event, repoPath) => {
   return await runGitStreaming(['pull'], repoPath, (payload) => {
     event.sender.send('git-progress', { repoPath, ...payload });
@@ -605,6 +369,8 @@ ipcMain.handle('push', async (event, repoPath) => {
     event.sender.send('git-progress', { repoPath, ...payload });
   });
 });
+
+ipcMain.handle('cancel-git', (_, repoPath) => cancelRepoOperations(repoPath));
 
 ipcMain.handle('confirm-dialog', async (e, { message, detail }) => {
   const win = BrowserWindow.fromWebContents(e.sender);

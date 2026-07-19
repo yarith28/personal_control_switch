@@ -17,7 +17,10 @@ export function setupTabs() {
 
   const activate = (name) => {
     for (const tab of tabs) {
-      tab.classList.toggle('active', tab.dataset.tab === name);
+      const active = tab.dataset.tab === name;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
     }
     for (const page of pages) {
       page.toggleAttribute('hidden', page.dataset.page !== name);
@@ -28,5 +31,14 @@ export function setupTabs() {
 
   for (const tab of tabs) {
     tab.addEventListener('click', () => activate(tab.dataset.tab));
+    tab.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      event.preventDefault();
+      const current = tabs.indexOf(tab);
+      const direction = event.key === 'ArrowRight' ? 1 : -1;
+      const next = tabs[(current + direction + tabs.length) % tabs.length];
+      activate(next.dataset.tab);
+      next.focus();
+    });
   }
 }

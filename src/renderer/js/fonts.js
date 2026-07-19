@@ -23,7 +23,11 @@ export function applyFont(font) {
   document.body.style.fontFamily = font.family;
   state.currentFont = font;
   document.querySelectorAll('.font-option').forEach((el) =>
-    el.classList.toggle('active', el.dataset.id === font.id)
+    {
+      const active = el.dataset.id === font.id;
+      el.classList.toggle('active', active);
+      el.setAttribute('aria-pressed', String(active));
+    }
   );
 }
 
@@ -35,9 +39,11 @@ export function buildFontPicker() {
     const btn = document.createElement('button');
     btn.className = 'font-option' + (font.id === state.currentFont?.id ? ' active' : '');
     btn.dataset.id = font.id;
+    btn.type = 'button';
     btn.style.fontFamily = font.family;
     btn.textContent = font.label;
     btn.title = font.label;
+    btn.setAttribute('aria-pressed', String(font.id === state.currentFont?.id));
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       applyFont(font);

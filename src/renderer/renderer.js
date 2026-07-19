@@ -2,6 +2,7 @@ import { log } from './js/log.js'; // registers error/unhandledrejection handler
 import {
   addBtn, fetchAllBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
   multiSelectBtn, organizeBtn, addFolderBtn, collapseBtn, helpToggleBtn,
+  projectSearchToggle, projectFilters, projectSearchInput,
 } from './js/dom.js';
 import { state, getProjects } from './js/state.js';
 import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
@@ -18,6 +19,7 @@ import { setupCommitTool } from './js/commit-tool.js';
 import { setupProjectDrop } from './js/project-drop.js';
 import { hydrateStaticIcons } from './js/icons.js';
 import { basename, withButtonLoading } from './js/util.js';
+import { showToast } from './js/notify.js';
 
 let autoRefreshInitialized = false;
 let startupRefreshTriggered = false;
@@ -97,6 +99,37 @@ collapseBtn.addEventListener('click', async () => {
   persist();
 });
 
+function setProjectSearchOpen(open) {
+  projectFilters?.toggleAttribute('hidden', !open);
+  projectSearchToggle?.classList.toggle('active', open);
+  projectSearchToggle?.setAttribute('aria-expanded', String(open));
+
+  if (open) {
+    requestAnimationFrame(() => projectSearchInput?.focus({ preventScroll: true }));
+    return;
+  }
+
+  if (projectSearchInput?.value || state.searchQuery) {
+    projectSearchInput.value = '';
+    state.searchQuery = '';
+    renderProjects();
+  }
+}
+
+projectSearchToggle?.addEventListener('click', () => {
+  setProjectSearchOpen(projectFilters?.hasAttribute('hidden') ?? true);
+});
+projectSearchInput?.addEventListener('input', () => {
+  state.searchQuery = projectSearchInput.value.trim();
+  renderProjects();
+});
+projectSearchInput?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  setProjectSearchOpen(false);
+  projectSearchToggle?.focus({ preventScroll: true });
+});
+
 // ── Init ────────────────────────────────────────────────────────────────────
 (async function init() {
   const platform = await window.api.getPlatform();
@@ -118,6 +151,7 @@ collapseBtn.addEventListener('click', async () => {
   outputToggleBtn?.addEventListener('click', () => {
     outputWrap.classList.toggle('collapsed');
     outputToggleBtn.classList.toggle('active', !outputWrap.classList.contains('collapsed'));
+    outputToggleBtn.setAttribute('aria-pressed', String(!outputWrap.classList.contains('collapsed')));
     persist();
   });
 
@@ -158,11 +192,14 @@ collapseBtn.addEventListener('click', async () => {
     e.stopPropagation();
     setHelperOpen(false);
     settingsPanel.classList.toggle('open');
+    e.currentTarget.setAttribute('aria-expanded', String(settingsPanel.classList.contains('open')));
   });
   settingsPanel?.addEventListener('click', (e) => e.stopPropagation());
   const closeAllDropdowns = () => {
     document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open, .color-palette-dropdown.open').forEach((d) => d.classList.remove('open'));
     document.querySelectorAll('.branch-wrap.open').forEach((w) => w.classList.remove('open'));
+    document.querySelectorAll('[aria-expanded="true"].name-branch, [aria-expanded="true"].project-open-trigger')
+      .forEach((trigger) => trigger.setAttribute('aria-expanded', 'false'));
   };
   const isDropdownInteractionTarget = (target) => (
     target instanceof Element
@@ -176,6 +213,7 @@ collapseBtn.addEventListener('click', async () => {
 
   document.addEventListener('click', () => {
     settingsPanel?.classList.remove('open');
+    document.getElementById('settings-toggle')?.setAttribute('aria-expanded', 'false');
     closeAllDropdowns();
   });
 
@@ -195,6 +233,13 @@ collapseBtn.addEventListener('click', async () => {
   setupAutoRefresh();
 
   const config = await window.api.loadConfig();
+  if (config.configRecovery) {
+    showToast(
+      config.configRecovery.title,
+      config.configRecovery.message,
+      { tone: config.configRecovery.tone || 'warning', duration: 12000 }
+    );
+  }
 
   state.currentTheme = THEMES.find((t) => t.id === config.theme) || THEMES[0];
   applyTheme(state.currentTheme);
@@ -238,6 +283,7 @@ collapseBtn.addEventListener('click', async () => {
   const logCollapsed = config.logCollapsed ?? true;
   outputWrap.classList.toggle('collapsed', logCollapsed);
   outputToggleBtn?.classList.toggle('active', !logCollapsed);
+  outputToggleBtn?.setAttribute('aria-pressed', String(!logCollapsed));
 
   // Load + migrate items into the nested tree model.
   //   v1 (oldest): config.projects = [{ path }]

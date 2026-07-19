@@ -9,6 +9,7 @@ import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { renderProjects } from './render-list.js';
 import { createBranchPicker } from './branch-picker.js';
 import { createProjectOpenMenu } from './project-open-menu.js';
+import { showToast } from './notify.js';
 
 function rawGitOutput(result) {
   return String(
@@ -51,6 +52,7 @@ export function renderRow(project, parentFolder = null) {
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.className = 'select';
+  checkbox.setAttribute('aria-label', `Select ${basename(project.path)} for batch operations`);
   checkbox.checked = !!project.selected;
   checkbox.disabled = !project.branches;
   checkbox.addEventListener('change', () => {
@@ -68,9 +70,11 @@ export function renderRow(project, parentFolder = null) {
   name.className = 'name';
   const nameInner = document.createElement('div');
   nameInner.className = 'name-inner';
-  const nameText = document.createElement('span');
+  const nameText = document.createElement('button');
+  nameText.type = 'button';
   nameText.className = 'name-text';
   nameText.textContent = basename(project.path);
+  nameText.setAttribute('aria-label', `Open ${basename(project.path)} with another application`);
   createProjectOpenMenu({
     trigger: nameText,
     projectPath: project.path,
@@ -103,6 +107,32 @@ export function renderRow(project, parentFolder = null) {
         setRowBusy(project, false);
       }
     },
+    onCreate: async (branch) => {
+      if (row.classList.contains('busy')) return false;
+      setRowBusy(project, true);
+      setRowStatus(project, `Creating ${branch}...`);
+      log(`[${basename(project.path)}] creating branch ${branch}...`);
+      try {
+        const res = await window.api.createBranch(project.path, branch);
+        if (!res.ok) {
+          logGitFailure(basename(project.path), 'branch creation failed', res);
+          showToast(
+            'Could not create branch',
+            res.errorSummary || 'Git could not create that branch.',
+            { tone: 'warning' }
+          );
+          return false;
+        }
+
+        await refreshBranches(project);
+        branchPicker.setBranches(project.branches || [], project.current, project.current);
+        log(`[${basename(project.path)}] created and switched to ${branch}`, true);
+        showToast('Branch created', branch);
+        return true;
+      } finally {
+        setRowBusy(project, false);
+      }
+    },
   });
   const nameBranch = branchPicker.el;
   branchPicker.setBranches(project.branches || [], project.current, project.current);
@@ -112,8 +142,10 @@ export function renderRow(project, parentFolder = null) {
 
   const pinBtn = document.createElement('button');
   pinBtn.className = 'pin-toggle' + (project.pinned ? ' active' : '');
+  pinBtn.type = 'button';
   pinBtn.title = project.pinned ? 'Unpin project' : 'Pin project to top';
   pinBtn.setAttribute('aria-pressed', String(!!project.pinned));
+  pinBtn.setAttribute('aria-label', pinBtn.title);
   pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });
   pinBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -131,7 +163,9 @@ export function renderRow(project, parentFolder = null) {
 
   const fetchBtn = document.createElement('button');
   fetchBtn.className = 'fetch-btn';
+  fetchBtn.type = 'button';
   fetchBtn.title = 'Fetch';
+  fetchBtn.setAttribute('aria-label', `Fetch ${basename(project.path)}`);
   fetchBtn.innerHTML = iconHtml('arrowDownUp', { size: 11, strokeWidth: 1.8 });
   fetchBtn.disabled = !project.branches;
   fetchBtn.addEventListener('click', (e) => {
@@ -145,15 +179,23 @@ export function renderRow(project, parentFolder = null) {
   fullPath.className = 'path';
   fullPath.textContent = '‎' + displayPath(project.path, state.homedir);
   fullPath.title = project.path;
+  const operationStatus = document.createElement('div');
+  operationStatus.className = 'operation-status';
+  operationStatus.textContent = project.statusText || '';
+  operationStatus.hidden = !project.statusText;
+  operationStatus.classList.toggle('warning', !!project.statusWarning);
   info.appendChild(name);
   info.appendChild(fullPath);
+  info.appendChild(operationStatus);
 
   const btnRow = document.createElement('div');
   btnRow.className = 'btn-row';
 
   const pullBtn = document.createElement('button');
   pullBtn.className = 'btn btn-pull';
+  pullBtn.type = 'button';
   pullBtn.title = 'Pull';
+  pullBtn.setAttribute('aria-label', `Pull ${basename(project.path)}`);
   pullBtn.innerHTML = iconHtml('arrowDown', { size: 11, strokeWidth: 1.85 });
   pullBtn.disabled = !project.branches;
   pullBtn.addEventListener('click', () => withButtonLoading(pullBtn, () => doPull(project)));
@@ -166,7 +208,9 @@ export function renderRow(project, parentFolder = null) {
 
   const pushBtn = document.createElement('button');
   pushBtn.className = 'btn btn-push';
+  pushBtn.type = 'button';
   pushBtn.title = 'Push';
+  pushBtn.setAttribute('aria-label', `Push ${basename(project.path)}`);
   pushBtn.innerHTML = iconHtml('arrowUp', { size: 11, strokeWidth: 1.85 });
   pushBtn.disabled = !project.branches;
   pushBtn.addEventListener('click', () => withButtonLoading(pushBtn, () => doPush(project)));
@@ -179,18 +223,43 @@ export function renderRow(project, parentFolder = null) {
 
   const commitBtn = document.createElement('button');
   commitBtn.className = 'btn btn-commit';
+  commitBtn.type = 'button';
   commitBtn.title = 'Quick commit';
+  commitBtn.setAttribute('aria-label', `Quick commit ${basename(project.path)}`);
   commitBtn.innerHTML = iconHtml('gitCommitVertical', { size: 11, strokeWidth: 1.8 });
   commitBtn.disabled = !project.branches || !project.uncommitted;
   commitBtn.addEventListener('click', () => doQuickCommit(project));
 
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-cancel';
+  cancelBtn.type = 'button';
+  cancelBtn.title = 'Cancel Git operation';
+  cancelBtn.setAttribute('aria-label', `Cancel Git operation for ${basename(project.path)}`);
+  cancelBtn.innerHTML = iconHtml('x', { size: 11, strokeWidth: 2 });
+  cancelBtn.hidden = !project.cancellable;
+  cancelBtn.addEventListener('click', async () => {
+    if (!project.cancellable || project.cancelling) return;
+    project.cancelling = true;
+    cancelBtn.disabled = true;
+    setRowStatus(project, 'Cancelling...');
+    const result = await window.api.cancelGit(project.path);
+    if (!result?.cancelled) {
+      project.cancelling = false;
+      cancelBtn.disabled = false;
+      setRowStatus(project, 'Waiting for Git to stop...', { warning: true });
+    }
+  });
+
   btnRow.appendChild(pullBtn);
   btnRow.appendChild(pushBtn);
   btnRow.appendChild(commitBtn);
+  btnRow.appendChild(cancelBtn);
 
 const moveBtn = document.createElement('button');
+  moveBtn.type = 'button';
   moveBtn.className = 'btn-move';
   moveBtn.title = 'Move to folder';
+  moveBtn.setAttribute('aria-label', `Move ${basename(project.path)} to a folder`);
   moveBtn.innerHTML = iconHtml('folderInput', { size: 11, strokeWidth: 1.8 });
 
   const moveDropdown = document.createElement('div');
@@ -224,7 +293,8 @@ const moveBtn = document.createElement('button');
       moveDropdown.appendChild(empty);
     } else {
       for (const opt of options) {
-        const el = document.createElement('div');
+        const el = document.createElement('button');
+        el.type = 'button';
         el.className = 'move-option';
         el.textContent = opt.label;
         el.addEventListener('click', (ev) => { ev.stopPropagation(); doMove(opt.target); });
@@ -236,9 +306,11 @@ const moveBtn = document.createElement('button');
   });
 
   const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
   removeBtn.className = 'remove';
   removeBtn.textContent = '×';
   removeBtn.title = 'Remove from list';
+  removeBtn.setAttribute('aria-label', `Remove ${basename(project.path)} from the list`);
   removeBtn.addEventListener('click', () => removeProject(project));
 
   // drag & drop reorder (organize mode only)
@@ -306,7 +378,9 @@ const moveBtn = document.createElement('button');
   if (project.busy) {
     row.classList.add('busy');
     row.querySelectorAll('button, input').forEach((el) => {
-      if (!el.classList.contains('remove')) el.disabled = true;
+      if (el.classList.contains('remove')) return;
+      if (el.classList.contains('btn-cancel') && project.cancellable) return;
+      el.disabled = true;
     });
   }
 
@@ -322,6 +396,7 @@ export function setRowBusy(project, busy) {
   if (!busy) {
     project.statusText = '';
     project.statusWarning = false;
+    project.cancelling = false;
   }
   const row = projectsEl.querySelector(
     `.project-row[data-path="${CSS.escape(project.path)}"]`
@@ -330,12 +405,45 @@ export function setRowBusy(project, busy) {
   row.classList.toggle('busy', busy);
   row.querySelectorAll('button, input').forEach((el) => {
     if (el.classList.contains('remove')) return;
+    if (el.classList.contains('btn-cancel') && busy && project.cancellable) {
+      el.disabled = false;
+      return;
+    }
     el.disabled = busy;
   });
+  if (!busy) {
+    const status = row.querySelector('.operation-status');
+    if (status) {
+      status.textContent = '';
+      status.hidden = true;
+      status.classList.remove('warning');
+    }
+  }
+}
+
+export function setRowCancellable(project, cancellable) {
+  if (!project) return;
+  project.cancellable = cancellable;
+  if (!cancellable) project.cancelling = false;
+  const row = projectsEl.querySelector(
+    `.project-row[data-path="${CSS.escape(project.path)}"]`
+  );
+  const cancelBtn = row?.querySelector('.btn-cancel');
+  if (!cancelBtn) return;
+  cancelBtn.hidden = !cancellable;
+  cancelBtn.disabled = !cancellable;
 }
 
 export function setRowStatus(project, text = '', { warning = false } = {}) {
   if (!project) return;
   project.statusText = text;
   project.statusWarning = warning;
+  const row = projectsEl.querySelector(
+    `.project-row[data-path="${CSS.escape(project.path)}"]`
+  );
+  const status = row?.querySelector('.operation-status');
+  if (!status) return;
+  status.textContent = text;
+  status.hidden = !text;
+  status.classList.toggle('warning', warning);
 }

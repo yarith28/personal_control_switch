@@ -6,7 +6,7 @@ import { showToast } from './notify.js';
 import { persist } from './persist.js';
 import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
-import { setRowBusy, setRowStatus } from './render-row.js';
+import { setRowBusy, setRowCancellable, setRowStatus } from './render-row.js';
 import { confirmDialog, promptDialog } from './modal.js';
 
 const LONG_RUNNING_WARNING_MS = 8000;
@@ -79,8 +79,10 @@ async function runProjectAction(project, {
   refreshAfter = true,
   warnLongRunning = false,
   notifyOnFailure = false,
+  cancellable = false,
 }) {
   const projectName = basename(project.path);
+  setRowCancellable(project, cancellable);
   setRowBusy(project, true);
   setRowStatus(project, `${startLabel}...`);
   log(`[${projectName}] ${actionLabel}...`);
@@ -94,6 +96,8 @@ async function runProjectAction(project, {
     if (res.ok) {
       const detail = res.liveOutput ? '' : (res.stdout + res.stderr).trim();
       log(`[${projectName}] ${successLabel}${detail ? '\n' + detail : ''}`, true);
+    } else if (res.cancelled) {
+      log(`[${projectName}] ${completedActionLabel(startLabel)} cancelled`, true);
     } else {
       logGitFailure(projectName, failureLabel, res);
       if (notifyOnFailure) {
@@ -125,6 +129,7 @@ async function runProjectAction(project, {
     return failure;
   } finally {
     if (warningTimer) window.clearTimeout(warningTimer);
+    setRowCancellable(project, false);
     setRowBusy(project, false);
     if (refreshAfter) await refreshAll({ force: true });
   }
@@ -168,6 +173,7 @@ export async function doPull(project) {
     action: (repoPath) => window.api.pull(repoPath),
     warnLongRunning: true,
     notifyOnFailure: true,
+    cancellable: true,
   });
 }
 
@@ -180,6 +186,7 @@ export async function doPush(project) {
     action: (repoPath) => window.api.push(repoPath),
     warnLongRunning: true,
     notifyOnFailure: true,
+    cancellable: true,
   });
 }
 
@@ -191,6 +198,7 @@ export async function doFetch(project) {
     failureLabel: 'fetch failed',
     action: (repoPath) => window.api.fetch(repoPath),
     warnLongRunning: true,
+    cancellable: true,
   });
 }
 
@@ -340,6 +348,7 @@ async function runBatchOp(opName, targets, opFn) {
       action: opFn,
       refreshAfter: false,
       warnLongRunning: ['Fetching', 'Pulling', 'Pushing'].includes(opName),
+      cancellable: ['Fetching', 'Pulling', 'Pushing'].includes(opName),
     };
     if (state.burstMode) {
       const results = await Promise.all(targets.map((p) => runProjectAction(p, projectOpts)));

@@ -66,6 +66,7 @@ export function renderFolderHeader(folder) {
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.className = 'select';
+  checkbox.setAttribute('aria-label', `Select all available projects in ${folder.name}`);
   checkboxLabel.appendChild(checkbox);
   checkboxLabel.insertAdjacentHTML('beforeend',
     `<span class="checkbox-box">${checkboxIconMarkup()}</span>`
@@ -97,9 +98,12 @@ export function renderFolderHeader(folder) {
   icon.className = 'folder-icon';
   icon.innerHTML = iconHtml('folder', { size: 15, strokeWidth: 1.8, attrs: { fill: 'currentColor' } });
 
-  const chevron = document.createElement('span');
+  const chevron = document.createElement('button');
+  chevron.type = 'button';
   chevron.className = 'group-chevron';
   chevron.textContent = '›';
+  chevron.setAttribute('aria-expanded', String(!folder.collapsed));
+  chevron.setAttribute('aria-label', `${folder.collapsed ? 'Expand' : 'Collapse'} ${folder.name}`);
 
   const nameEl = document.createElement('span');
   nameEl.className = 'group-name';
@@ -114,8 +118,10 @@ export function renderFolderHeader(folder) {
 
   const pinBtn = document.createElement('button');
   pinBtn.className = 'pin-toggle' + (folder.pinned ? ' active' : '');
+  pinBtn.type = 'button';
   pinBtn.title = folder.pinned ? 'Unpin folder' : 'Pin folder to top';
   pinBtn.setAttribute('aria-pressed', String(!!folder.pinned));
+  pinBtn.setAttribute('aria-label', pinBtn.title);
   pinBtn.innerHTML = iconHtml('pin', { size: 11, strokeWidth: 1.8 });
   pinBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -127,11 +133,13 @@ export function renderFolderHeader(folder) {
   // folder fetch action
   const fetchBtn = document.createElement('button');
   fetchBtn.className = 'fetch-btn';
+  fetchBtn.type = 'button';
   fetchBtn.innerHTML = iconHtml('arrowDownUp', { size: 11, strokeWidth: 1.8 });
   fetchBtn.title = fetchableCount > 0
     ? `Fetch all ${fetchableCount} project${fetchableCount === 1 ? '' : 's'} in this folder`
     : 'No fetchable projects in this folder';
   fetchBtn.disabled = fetchableCount === 0;
+  fetchBtn.setAttribute('aria-label', fetchBtn.title);
   fetchBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (fetchBtn.disabled) return;
@@ -141,7 +149,9 @@ export function renderFolderHeader(folder) {
   // color marker (edit mode only)
   const colorBtn = document.createElement('button');
   colorBtn.className = 'folder-color-btn';
+  colorBtn.type = 'button';
   colorBtn.title = 'Folder color';
+  colorBtn.setAttribute('aria-label', `Choose a color for ${folder.name}`);
   if (folder.color) colorBtn.style.backgroundColor = folder.color;
   else colorBtn.classList.add('no-color');
 
@@ -169,14 +179,17 @@ export function renderFolderHeader(folder) {
     document.querySelectorAll('.branch-dropdown.open, .move-dropdown.open, .color-palette-dropdown.open')
       .forEach((d) => d.classList.remove('open'));
     colorPalette.innerHTML = '';
-    const none = document.createElement('div');
+    const none = document.createElement('button');
+    none.type = 'button';
     none.className = 'color-option color-option-none';
     none.title = 'No color';
     none.addEventListener('click', (ev) => { ev.stopPropagation(); setColor(null); });
     colorPalette.appendChild(none);
     for (const c of FOLDER_COLORS) {
-      const opt = document.createElement('div');
+      const opt = document.createElement('button');
+      opt.type = 'button';
       opt.className = 'color-option';
+      opt.setAttribute('aria-label', `Set folder color to ${c}`);
       opt.style.backgroundColor = c;
       if (folder.color === c) opt.classList.add('active');
       opt.addEventListener('click', (ev) => { ev.stopPropagation(); setColor(c); });
@@ -187,8 +200,10 @@ export function renderFolderHeader(folder) {
   });
 
   const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
   deleteBtn.className = 'group-delete';
   deleteBtn.title = 'Remove folder (projects move to top level)';
+  deleteBtn.setAttribute('aria-label', `Remove ${folder.name} folder`);
   deleteBtn.innerHTML = '×';
   deleteBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -226,6 +241,8 @@ export function renderFolderHeader(folder) {
   const toggleCollapse = async () => {
     folder.collapsed = !folder.collapsed;
     el.classList.toggle('collapsed', folder.collapsed);
+    chevron.setAttribute('aria-expanded', String(!folder.collapsed));
+    chevron.setAttribute('aria-label', `${folder.collapsed ? 'Expand' : 'Collapse'} ${folder.name}`);
     let sibling = el.nextElementSibling;
     while (sibling && sibling.classList.contains('group-member')) {
       sibling.hidden = folder.collapsed;

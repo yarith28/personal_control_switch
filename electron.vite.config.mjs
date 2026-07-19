@@ -9,7 +9,11 @@ export default defineConfig({
     build: {
       outDir: resolve(rootDir, 'out/main'),
       rollupOptions: {
-        input: resolve(rootDir, 'src/main/index.js'),
+        input: {
+          index: resolve(rootDir, 'src/main/index.js'),
+          'git-process': resolve(rootDir, 'src/main/git-process.js'),
+          'config-store': resolve(rootDir, 'src/main/config-store.js'),
+        },
       },
     },
   },

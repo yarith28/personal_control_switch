@@ -9,6 +9,7 @@ export const state = {
   burstMode: false,
   helperSeen: false,
   homedir: null,
+  searchQuery: '',
 };
 
 // ── Tree helpers ─────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ export function setMultiSelect(active) {
   state.multiSelect = active;
   container.classList.toggle('multi-select', active);
   multiSelectBtn.classList.toggle('active', active);
+  multiSelectBtn.setAttribute('aria-pressed', String(active));
   if (!active) {
     for (const p of getProjects()) p.selected = false;
     selectAll.checked = false;
@@ -22,5 +23,6 @@ export function setOrganizeMode(active) {
   state.organizeMode = active;
   container.classList.toggle('organize-mode', active);
   organizeBtn.classList.toggle('active', active);
+  organizeBtn.setAttribute('aria-pressed', String(active));
   renderProjects();
 }

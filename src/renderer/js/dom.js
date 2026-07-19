@@ -12,3 +12,7 @@ export const organizeBtn = document.getElementById('organize-btn');
 export const addFolderBtn = document.getElementById('add-folder-btn');
 export const container = document.querySelector('.container');
 export const collapseBtn = document.getElementById('collapse-btn');
+export const projectSearchToggle = document.getElementById('project-search-toggle');
+export const projectFilters = document.getElementById('project-filters');
+export const projectSearchInput = document.getElementById('project-search-input');
+export const filterSummary = document.getElementById('filter-summary');

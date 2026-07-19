@@ -16,52 +16,55 @@
 
     <div class="container">
       <header class="header" id="titlebar">
-        <nav class="tab-bar" id="tab-bar">
-          <button class="tab active" id="tab-git-sync" data-tab="git-sync" type="button">Git Sync</button>
-          <button class="tab" id="tab-cross-sync" data-tab="cross-sync" type="button">Cross Sync</button>
-          <button class="tab" id="tab-commit-tool" data-tab="commit-tool" type="button">Commit Tool</button>
+        <nav class="tab-bar" id="tab-bar" role="tablist" aria-label="App sections">
+          <button class="tab active" id="tab-git-sync" data-tab="git-sync" type="button" role="tab" aria-selected="true" aria-controls="page-git-sync">Git Sync</button>
+          <button class="tab" id="tab-cross-sync" data-tab="cross-sync" type="button" role="tab" aria-selected="false" aria-controls="page-cross-sync" tabindex="-1">Cross Sync</button>
+          <button class="tab" id="tab-commit-tool" data-tab="commit-tool" type="button" role="tab" aria-selected="false" aria-controls="page-commit-tool" tabindex="-1">Commit Tool</button>
         </nav>
         <div class="window-controls" id="window-controls">
-          <button class="win-btn win-min" id="win-min" title="Minimize">
+          <button class="win-btn win-min" id="win-min" type="button" title="Minimize" aria-label="Minimize window">
             <span data-icon="minus" data-icon-size="9" data-icon-stroke="1.95"></span>
           </button>
-          <button class="win-btn win-max" id="win-max" title="Maximize">
+          <button class="win-btn win-max" id="win-max" type="button" title="Maximize" aria-label="Maximize window">
             <span data-icon="square" data-icon-size="9" data-icon-stroke="1.8"></span>
           </button>
-          <button class="win-btn win-close" id="win-close" title="Close">
+          <button class="win-btn win-close" id="win-close" type="button" title="Close" aria-label="Close window">
             <span data-icon="x" data-icon-size="9" data-icon-stroke="1.95"></span>
           </button>
         </div>
       </header>
 
-      <div class="page" id="page-git-sync" data-page="git-sync">
+      <div class="page" id="page-git-sync" data-page="git-sync" role="tabpanel" aria-labelledby="tab-git-sync">
         <div class="toolbar">
-          <button id="add-project" class="btn btn-primary">+ Add project</button>
+          <button id="add-project" class="btn btn-primary" type="button">+ Add project</button>
           <div class="toolbar-spacer"></div>
+          <button id="project-search-toggle" class="btn-select-toggle icon-only" type="button" title="Search projects" aria-label="Search projects" aria-expanded="false" aria-controls="project-filters">
+            <span data-icon="search" data-icon-size="12" data-icon-stroke="1.8"></span>
+          </button>
           <div class="help-wrap">
-            <button id="help-toggle" class="btn-select-toggle icon-only" title="Quick help">
+            <button id="help-toggle" class="btn-select-toggle icon-only" type="button" title="Quick help" aria-label="Open quick help">
               <span data-icon="circleHelp" data-icon-size="12" data-icon-stroke="1.8"></span>
             </button>
           </div>
-          <button id="fetch-all" class="btn-select-toggle icon-only" title="Fetch all projects" disabled>
+          <button id="fetch-all" class="btn-select-toggle icon-only" type="button" title="Fetch all projects" aria-label="Fetch all projects" disabled>
             <span data-icon="arrowDownUp" data-icon-size="12" data-icon-stroke="1.8"></span>
           </button>
-          <button id="multi-select-btn" class="btn-select-toggle icon-only" title="Batch select">
+          <button id="multi-select-btn" class="btn-select-toggle icon-only" type="button" title="Batch select" aria-label="Toggle batch selection" aria-pressed="false">
             <span data-icon="listChecks" data-icon-size="12" data-icon-stroke="1.8"></span>
           </button>
-          <button id="organize-btn" class="btn-select-toggle icon-only" title="Edit / organize">
+          <button id="organize-btn" class="btn-select-toggle icon-only" type="button" title="Edit / organize" aria-label="Toggle organize mode" aria-pressed="false">
             <span data-icon="pencil" data-icon-size="11" data-icon-stroke="1.8"></span>
           </button>
-          <button id="collapse-btn" class="btn-select-toggle icon-only" title="Collapse all folders" disabled>
+          <button id="collapse-btn" class="btn-select-toggle icon-only" type="button" title="Collapse all folders" aria-label="Collapse all folders" disabled>
             <span class="icon-collapse" data-icon="chevronsUp" data-icon-size="12" data-icon-stroke="1.8"></span>
             <span class="icon-expand" data-icon="chevronsDown" data-icon-size="12" data-icon-stroke="1.8"></span>
           </button>
           <div class="shared-tab-controls" id="shared-tab-controls">
-            <button id="output-toggle" class="btn-select-toggle icon-only" title="Toggle log">
+            <button id="output-toggle" class="btn-select-toggle icon-only" type="button" title="Toggle log" aria-label="Toggle activity log" aria-pressed="false">
               <span data-icon="logs" data-icon-size="11" data-icon-stroke="1.8"></span>
             </button>
             <div class="settings-wrap">
-              <button id="settings-toggle" class="btn-select-toggle icon-only" title="Settings">
+              <button id="settings-toggle" class="btn-select-toggle icon-only" type="button" title="Settings" aria-label="Open settings" aria-expanded="false">
                 <span data-icon="settings2" data-icon-size="12" data-icon-stroke="1.8"></span>
               </button>
               <div class="settings-panel" id="settings-panel">
@@ -75,22 +78,29 @@
                 </div>
                 <div class="settings-row">
                   <div class="settings-label">Compact</div>
-                  <button class="toggle-switch" id="compact-toggle" type="button" aria-pressed="false"></button>
+                  <button class="toggle-switch" id="compact-toggle" type="button" aria-label="Toggle compact mode" aria-pressed="false"></button>
                 </div>
                 <div class="settings-row">
                   <div class="settings-label" title="Run batch operations in parallel instead of one at a time">Burst</div>
-                  <button class="toggle-switch" id="burst-toggle" type="button" aria-pressed="false"></button>
+                  <button class="toggle-switch" id="burst-toggle" type="button" aria-label="Toggle burst mode" aria-pressed="false"></button>
                 </div>
               </div>
             </div>
           </div>
         </div>
+        <div class="filter-bar" id="project-filters" hidden>
+          <label class="project-search" for="project-search-input">
+            <span data-icon="search" data-icon-size="13" data-icon-stroke="1.9"></span>
+            <input id="project-search-input" type="search" placeholder="Search projects, paths, or branches" autocomplete="off" spellcheck="false" />
+          </label>
+          <span class="filter-summary" id="filter-summary" aria-live="polite"></span>
+        </div>
         <div class="edit-bar" id="edit-bar">
-          <button id="add-folder-btn" class="btn btn-primary">+ Folder</button>
+          <button id="add-folder-btn" class="btn btn-primary" type="button">+ Folder</button>
         </div>
         <div class="select-bar" id="select-bar">
           <label class="select-all" id="select-all-label">
-            <input type="checkbox" id="select-all" />
+            <input type="checkbox" id="select-all" aria-label="Select all available projects" />
             <span class="checkbox-box">
               <span class="checkbox-check" data-icon="check" data-icon-size="9" data-icon-stroke="2.1"></span>
               <span class="checkbox-dash" data-icon="minus" data-icon-size="8" data-icon-stroke="2.1"></span>
@@ -98,9 +108,9 @@
             <span>All</span>
           </label>
           <div class="spacer"></div>
-          <button id="pull-selected" class="btn btn-pull" disabled>Pull</button>
-          <button id="push-selected" class="btn btn-push" disabled>Push</button>
-          <button id="fetch-selected" class="btn btn-fetch" disabled>Fetch</button>
+          <button id="pull-selected" class="btn btn-pull" type="button" disabled>Pull</button>
+          <button id="push-selected" class="btn btn-push" type="button" disabled>Push</button>
+          <button id="fetch-selected" class="btn btn-fetch" type="button" disabled>Fetch</button>
         </div>
 
         <div id="projects" class="projects">
@@ -115,11 +125,11 @@
         </div>
       </div>
 
-      <div class="page" id="page-cross-sync" data-page="cross-sync" hidden>
+      <div class="page" id="page-cross-sync" data-page="cross-sync" role="tabpanel" aria-labelledby="tab-cross-sync" hidden>
         <div class="cross" id="cross-content"></div>
       </div>
 
-      <div class="page" id="page-commit-tool" data-page="commit-tool" hidden>
+      <div class="page" id="page-commit-tool" data-page="commit-tool" role="tabpanel" aria-labelledby="tab-commit-tool" hidden>
         <div class="toolbar commit-tool-toolbar">
           <div class="toolbar-spacer"></div>
         </div>
@@ -128,7 +138,7 @@
     </div>
 
     <div class="modal-overlay" id="confirm-modal" hidden>
-      <div class="modal-card">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-message" aria-describedby="modal-detail">
         <div class="modal-message" id="modal-message"></div>
         <div class="modal-detail" id="modal-detail"></div>
         <input class="modal-input" id="modal-input" type="text" hidden />
@@ -140,8 +150,8 @@
           <span id="modal-option-label"></span>
         </label>
         <div class="modal-actions">
-          <button class="btn modal-cancel" id="modal-cancel">Cancel</button>
-          <button class="btn modal-confirm" id="modal-confirm">Remove</button>
+          <button class="btn modal-cancel" id="modal-cancel" type="button">Cancel</button>
+          <button class="btn modal-confirm" id="modal-confirm" type="button">Remove</button>
         </div>
       </div>
     </div>
@@ -154,7 +164,7 @@
             <div class="helper-eyebrow">Quick tour</div>
             <div class="helper-title" id="helper-title">This is what the toolbar and project actions do</div>
           </div>
-          <button class="helper-close" id="helper-close" title="Close helper">
+          <button class="helper-close" id="helper-close" type="button" title="Close helper" aria-label="Close quick help">
             <span data-icon="x" data-icon-size="11" data-icon-stroke="1.9"></span>
           </button>
         </div>
@@ -226,7 +236,7 @@
         </div>
         <div class="helper-footer">
           <div class="helper-note">The question button will reopen this helper anytime.</div>
-          <button class="btn helper-confirm" id="helper-confirm">Got it</button>
+          <button class="btn helper-confirm" id="helper-confirm" type="button">Got it</button>
         </div>
       </div>
     </div>

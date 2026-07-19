@@ -89,7 +89,11 @@ export function applyTheme(theme) {
   for (const [p, v] of Object.entries(theme.vars)) root.style.setProperty(p, v);
   state.currentTheme = theme;
   document.querySelectorAll('.swatch').forEach((el) =>
-    el.classList.toggle('active', el.dataset.id === theme.id)
+    {
+      const active = el.dataset.id === theme.id;
+      el.classList.toggle('active', active);
+      el.setAttribute('aria-pressed', String(active));
+    }
   );
 }
 
@@ -102,6 +106,9 @@ export function buildSwatches() {
     dot.style.background = theme.swatch;
     dot.dataset.id = theme.id;
     dot.title = theme.label;
+    dot.type = 'button';
+    dot.setAttribute('aria-label', `Use ${theme.label} theme`);
+    dot.setAttribute('aria-pressed', String(theme.id === state.currentTheme.id));
     dot.addEventListener('click', async (e) => {
       e.stopPropagation();
       applyTheme(theme);
