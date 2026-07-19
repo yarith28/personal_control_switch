@@ -10,10 +10,6 @@ let root = null;
 let toolbar = null;
 let projectSelect = null;
 let branchLabel = null;
-let nameInput = null;
-let emailInput = null;
-let identityHint = null;
-let saveIdentityButton = null;
 let historyList = null;
 let historyCount = null;
 let batchToggleButton = null;
@@ -27,7 +23,6 @@ let batchFocusSha = null;
 let batchOptions = { authorMode: 'global', committerMode: 'global', reSign: false };
 let historyRequest = 0;
 let detailRequest = 0;
-let identityBusy = false;
 let rewriteBusy = false;
 let lastAutoRefreshAt = 0;
 let commitLimit = 100;
@@ -65,34 +60,6 @@ function localDateTimeValue(value) {
   if (Number.isNaN(date.getTime())) return '';
   const pad = (number) => String(number).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function identityDirty() {
-  return nameInput?.value.trim() !== savedIdentity.name || emailInput?.value.trim() !== savedIdentity.email;
-}
-
-function conventionalEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function syncIdentityState() {
-  const name = nameInput?.value.trim() || '';
-  const email = emailInput?.value.trim() || '';
-  const dirty = identityDirty();
-  if (identityHint) {
-    if (email && !conventionalEmail(email)) {
-      identityHint.textContent = 'Nonstandard email format';
-      identityHint.className = 'commit-identity-hint warning';
-    } else if (dirty) {
-      identityHint.textContent = 'Unsaved global identity';
-      identityHint.className = 'commit-identity-hint';
-    } else {
-      identityHint.textContent = 'Global Git configuration';
-      identityHint.className = 'commit-identity-hint';
-    }
-  }
-  if (saveIdentityButton) saveIdentityButton.disabled = identityBusy || !name || !email || !dirty;
-  syncEditorState();
 }
 
 function populateProjects() {
@@ -135,39 +102,6 @@ function buildShell() {
   branchLabel = el('span', { class: 'commit-branch-label' });
   toolbar.prepend(projectWrap, branchLabel);
 
-  nameInput = el('input', {
-    class: 'commit-field-input',
-    type: 'text',
-    autocomplete: 'off',
-    placeholder: 'Git user name',
-    'aria-label': 'Global Git name',
-  });
-  emailInput = el('input', {
-    class: 'commit-field-input',
-    type: 'text',
-    autocomplete: 'off',
-    spellcheck: 'false',
-    placeholder: 'Git email',
-    'aria-label': 'Global Git email',
-  });
-  nameInput.addEventListener('input', syncIdentityState);
-  emailInput.addEventListener('input', syncIdentityState);
-  identityHint = el('div', { class: 'commit-identity-hint', text: 'Global Git configuration' });
-  saveIdentityButton = el('button', {
-    class: 'btn btn-primary commit-save-identity',
-    onclick: saveIdentity,
-  }, ['Update']);
-
-  const identityBand = el('section', { class: 'commit-identity-band' }, [
-    el('div', { class: 'commit-section-heading' }, [
-      el('div', { class: 'commit-section-title', text: 'Global identity' }),
-      identityHint,
-    ]),
-    el('label', { class: 'commit-field' }, [el('span', { text: 'Name' }), nameInput]),
-    el('label', { class: 'commit-field' }, [el('span', { text: 'Email' }), emailInput]),
-    saveIdentityButton,
-  ]);
-
   historyList = el('div', { class: 'commit-history-list' });
   historyCount = el('div', { class: 'commit-history-count' });
   batchToggleButton = el('button', {
@@ -189,15 +123,14 @@ function buildShell() {
   ]);
   editor = el('section', { class: 'commit-editor' });
 
-  root.replaceChildren(identityBand, el('div', { class: 'commit-main' }, [historyPanel, editor]));
+  root.replaceChildren(el('div', { class: 'commit-main' }, [historyPanel, editor]));
   renderEditorEmpty('Select a commit to inspect its metadata.');
 }
 
-async function loadIdentity({ preserveEdits = false } = {}) {
-  if (preserveEdits && identityDirty()) return;
+async function loadIdentity() {
   let result;
   try {
-    result = await window.api.commitToolGetGlobalIdentity();
+    result = await window.api.identityGet('global');
   } catch (error) {
     showToast('Could not read global Git identity', error.message || '', { tone: 'error' });
     return;
@@ -207,36 +140,7 @@ async function loadIdentity({ preserveEdits = false } = {}) {
     return;
   }
   savedIdentity = { name: result.name || '', email: result.email || '' };
-  nameInput.value = savedIdentity.name;
-  emailInput.value = savedIdentity.email;
-  syncIdentityState();
-}
-
-async function saveIdentity() {
-  if (identityBusy) return;
-  identityBusy = true;
-  syncIdentityState();
-  const identity = { name: nameInput.value.trim(), email: emailInput.value.trim() };
-  try {
-    let result;
-    try {
-      result = await window.api.commitToolSaveGlobalIdentity(identity);
-    } catch (error) {
-      showToast('Global identity was not saved', error.message || '', { tone: 'error' });
-      return;
-    }
-    if (!result.ok) {
-      showToast('Global identity was not saved', result.error || '', { tone: 'error' });
-      if (result.raw) logDetails('[commit-tool] global identity update failed', result.raw);
-      return;
-    }
-    savedIdentity = { name: result.name, email: result.email };
-    showToast('Global Git identity updated', `${result.name} <${result.email}>`);
-    log(`[commit-tool] global identity updated to ${result.name} <${result.email}>`, true);
-  } finally {
-    identityBusy = false;
-    syncIdentityState();
-  }
+  syncEditorState();
 }
 
 function renderHistoryLoading() {
@@ -463,7 +367,7 @@ function hasCommitDraft() {
 
 function autoRefreshHistory() {
   const page = document.getElementById('page-commit-tool');
-  if (!page || page.hasAttribute('hidden') || document.hidden || rewriteBusy || identityDirty() || hasCommitDraft()) return;
+  if (!page || page.hasAttribute('hidden') || document.hidden || rewriteBusy || hasCommitDraft()) return;
   const now = Date.now();
   if (now - lastAutoRefreshAt < 500) return;
   lastAutoRefreshAt = now;
@@ -636,7 +540,7 @@ async function rewriteBatchCommits() {
   }
   const needsGlobalIdentity = batchOptions.authorMode === 'global' || batchOptions.committerMode === 'global';
   if (needsGlobalIdentity && (!savedIdentity.name || !savedIdentity.email)) {
-    showToast('Global Git identity required', 'Update the global name and email before using the global identity.', { tone: 'error' });
+    showToast('Global Git identity required', 'Set the global name and email in Identity Tool before using this option.', { tone: 'error' });
     return;
   }
 
@@ -700,7 +604,7 @@ async function rewriteBatchCommits() {
     await loadHistory();
   } finally {
     rewriteBusy = false;
-    syncIdentityState();
+    syncEditorState();
   }
 }
 
@@ -851,7 +755,7 @@ async function rewriteCommit({ authorMode, authorDateMode, committerMode, custom
   }
   const needsGlobalIdentity = authorMode.value === 'global' || committerMode.value === 'global';
   if (needsGlobalIdentity && (!savedIdentity.name || !savedIdentity.email)) {
-    showToast('Global Git identity required', 'Update the global name and email before using the global identity.', { tone: 'error' });
+    showToast('Global Git identity required', 'Set the global name and email in Identity Tool before using this option.', { tone: 'error' });
     return;
   }
 
@@ -952,7 +856,7 @@ async function rewriteCommit({ authorMode, authorDateMode, committerMode, custom
     await loadHistory(result.newCommit);
   } finally {
     rewriteBusy = false;
-    syncIdentityState();
+    syncEditorState();
   }
 }
 
@@ -972,7 +876,7 @@ export function setupCommitTool(initialConfig = {}) {
     if (!commitToolActive) return;
     const previousProject = projectSelect.value;
     populateProjects();
-    loadIdentity({ preserveEdits: true });
+    loadIdentity();
     if (previousProject !== projectSelect.value) {
       batchMode = false;
       batchSelected.clear();

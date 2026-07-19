@@ -2,7 +2,12 @@ import { state, findFolderById, findProjectByPath, findLocation, removeItem } fr
 import { projectsEl } from './dom.js';
 import { persist } from './persist.js';
 import { renderProjects, syncCollapseBtn } from './render-list.js';
-import { fetchFolderProjects, updateBatchButtons } from './actions.js';
+import {
+  fetchFolderProjects,
+  pullFolderProjects,
+  pushFolderProjects,
+  updateBatchButtons,
+} from './actions.js';
 import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { confirmDialog } from './modal.js';
 import { positionDropdown, withButtonLoading } from './util.js';
@@ -114,7 +119,7 @@ export function renderFolderHeader(folder) {
     startRename(nameEl);
   });
 
-  const fetchableCount = folder.items.filter((p) => p.branches).length;
+  const actionableCount = folder.items.filter((p) => p.branches).length;
 
   const pinBtn = document.createElement('button');
   pinBtn.className = 'pin-toggle' + (folder.pinned ? ' active' : '');
@@ -130,20 +135,66 @@ export function renderFolderHeader(folder) {
     renderProjects();
   });
 
-  // folder fetch action
-  const fetchBtn = document.createElement('button');
-  fetchBtn.className = 'fetch-btn';
-  fetchBtn.type = 'button';
-  fetchBtn.innerHTML = iconHtml('arrowDownUp', { size: 11, strokeWidth: 1.8 });
-  fetchBtn.title = fetchableCount > 0
-    ? `Fetch all ${fetchableCount} project${fetchableCount === 1 ? '' : 's'} in this folder`
-    : 'No fetchable projects in this folder';
-  fetchBtn.disabled = fetchableCount === 0;
-  fetchBtn.setAttribute('aria-label', fetchBtn.title);
-  fetchBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (fetchBtn.disabled) return;
-    await withButtonLoading(fetchBtn, () => fetchFolderProjects(folder));
+  // Folder-wide Git actions. They stay visually quiet until the header is
+  // hovered or one of the controls receives keyboard focus.
+  const folderActions = document.createElement('div');
+  folderActions.className = 'folder-actions';
+  let folderActionPending = false;
+
+  const createFolderAction = ({ action, iconName, run, confirmation = '' }) => {
+    const button = document.createElement('button');
+    button.className = `folder-action-btn folder-${action.toLowerCase()}-btn`;
+    button.type = 'button';
+    button.innerHTML = iconHtml(iconName, { size: 11, strokeWidth: 1.8 });
+    button.title = actionableCount > 0
+      ? `${action} all ${actionableCount} project${actionableCount === 1 ? '' : 's'} in this folder`
+      : `No available projects to ${action.toLowerCase()} in this folder`;
+    button.disabled = actionableCount === 0;
+    button.setAttribute('aria-label', button.title);
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (
+        button.disabled
+        || folderActionPending
+        || folderActions.querySelector('.btn-loading')
+      ) return;
+
+      folderActionPending = true;
+      try {
+        if (confirmation) {
+          const confirmed = await confirmDialog({
+            message: `${action} all projects in "${folder.name}"?`,
+            detail: confirmation,
+            confirmText: `${action} all`,
+            danger: false,
+          });
+          if (!confirmed) return;
+        }
+        await withButtonLoading(button, run);
+      } finally {
+        folderActionPending = false;
+      }
+    });
+    folderActions.appendChild(button);
+    return button;
+  };
+
+  createFolderAction({
+    action: 'Pull',
+    iconName: 'arrowDown',
+    run: () => pullFolderProjects(folder),
+    confirmation: `This runs Git pull in ${actionableCount} project${actionableCount === 1 ? '' : 's'}. Local branches may be updated, and conflicts may require manual resolution.`,
+  });
+  createFolderAction({
+    action: 'Push',
+    iconName: 'arrowUp',
+    run: () => pushFolderProjects(folder),
+    confirmation: `This runs Git push in ${actionableCount} project${actionableCount === 1 ? '' : 's'} and updates their configured remotes.`,
+  });
+  createFolderAction({
+    action: 'Fetch',
+    iconName: 'arrowDownUp',
+    run: () => fetchFolderProjects(folder),
   });
 
   // color marker (edit mode only)
@@ -234,7 +285,7 @@ export function renderFolderHeader(folder) {
     pinBtn.classList.remove('active');
     el.appendChild(pinBtn);
   }
-  el.appendChild(fetchBtn);
+  el.appendChild(folderActions);
   el.appendChild(colorBtn);
   el.appendChild(deleteBtn);
 
@@ -260,7 +311,7 @@ export function renderFolderHeader(folder) {
     if (nameEl.contentEditable === 'true') return;
     if (e.target === deleteBtn) return;
     if (e.target.closest('.pin-toggle')) return;
-    if (e.target.closest('.fetch-btn')) return;
+    if (e.target.closest('.folder-action-btn')) return;
     if (e.target.closest('.folder-color-btn')) return;
     await toggleCollapse();
   });

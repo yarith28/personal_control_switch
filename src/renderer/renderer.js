@@ -16,6 +16,7 @@ import { setMultiSelect, setOrganizeMode } from './js/modes.js';
 import { setupTabs } from './js/tabs.js';
 import { setupCrossSync } from './js/cross-sync.js';
 import { setupCommitTool } from './js/commit-tool.js';
+import { setupIdentityTool } from './js/identity-tool.js';
 import { setupProjectDrop } from './js/project-drop.js';
 import { hydrateStaticIcons } from './js/icons.js';
 import { basename, withButtonLoading } from './js/util.js';
@@ -357,6 +358,7 @@ projectSearchInput?.addEventListener('keydown', (event) => {
   // Cross Sync tab — build its page from the saved links now that projects exist.
   setupCrossSync(config.links || []);
   setupCommitTool(config.commitTool || {});
+  setupIdentityTool(config.identityTool || {});
 
   requestAnimationFrame(() => {
     document.body.classList.remove('app-loading');

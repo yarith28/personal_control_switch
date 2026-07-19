@@ -13,6 +13,7 @@ Git Sync is a desktop dashboard for working with multiple Git repositories. It k
 - Create or amend quick commits
 - Compare and coordinate branches between independent local repositories with Cross Sync
 - Inspect commit history and safely rewrite supported commit metadata with Commit Tool
+- Manage global Git identity and per-project identity overrides with Identity Tool
 - Choose themes, fonts, and compact layout
 
 ## Requirements
@@ -86,3 +87,4 @@ The included packaging configuration does not sign installers. Public distributi
 4. Use search to focus a large repository list.
 5. Open the activity log for Git output and error details.
 6. Open the in-app quick tour for toolbar and repository-action help.
+7. Use **Identity Tool** to update the global Git name/email or set an override for a project from Git Sync.

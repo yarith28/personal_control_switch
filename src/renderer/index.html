@@ -20,6 +20,7 @@
           <button class="tab active" id="tab-git-sync" data-tab="git-sync" type="button" role="tab" aria-selected="true" aria-controls="page-git-sync">Git Sync</button>
           <button class="tab" id="tab-cross-sync" data-tab="cross-sync" type="button" role="tab" aria-selected="false" aria-controls="page-cross-sync" tabindex="-1">Cross Sync</button>
           <button class="tab" id="tab-commit-tool" data-tab="commit-tool" type="button" role="tab" aria-selected="false" aria-controls="page-commit-tool" tabindex="-1">Commit Tool</button>
+          <button class="tab" id="tab-identity-tool" data-tab="identity-tool" type="button" role="tab" aria-selected="false" aria-controls="page-identity-tool" tabindex="-1">Identity Tool</button>
         </nav>
         <div class="window-controls" id="window-controls">
           <button class="win-btn win-min" id="win-min" type="button" title="Minimize" aria-label="Minimize window">
@@ -134,6 +135,13 @@
           <div class="toolbar-spacer"></div>
         </div>
         <div class="commit-tool-workspace" id="commit-tool-workspace"></div>
+      </div>
+
+      <div class="page" id="page-identity-tool" data-page="identity-tool" role="tabpanel" aria-labelledby="tab-identity-tool" hidden>
+        <div class="toolbar identity-tool-toolbar">
+          <div class="toolbar-spacer"></div>
+        </div>
+        <div class="identity-tool-workspace" id="identity-tool-workspace"></div>
       </div>
     </div>
 

@@ -107,6 +107,28 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal(created.ok, true, created.errorSummary);
   assert.equal((await git(second, 'branch', '--show-current')).stdout.trim(), 'feature/new-control');
   assert.equal((await handlers.get('create-branch')(null, second, 'invalid branch name')).ok, false);
+
+  const projectIdentity = await handlers.get('identity-get')(
+    null,
+    { scope: 'project', repoPath: second }
+  );
+  assert.equal(projectIdentity.ok, true);
+  assert.equal(projectIdentity.name, 'Integration Test');
+  assert.equal(projectIdentity.email, 'integration@example.com');
+
+  const savedIdentity = await handlers.get('identity-save')(null, {
+    scope: 'project',
+    repoPath: second,
+    name: 'Project Override',
+    email: 'project@example.com',
+  });
+  assert.equal(savedIdentity.ok, true, savedIdentity.error);
+  assert.equal((await git(second, 'config', '--local', '--get', 'user.name')).stdout.trim(), 'Project Override');
+
+  const clearedIdentity = await handlers.get('identity-clear-project')(null, second);
+  assert.equal(clearedIdentity.ok, true, clearedIdentity.error);
+  assert.equal(clearedIdentity.hasNameOverride, false);
+  assert.equal(clearedIdentity.hasEmailOverride, false);
 });
 
 test('Cross Sync compares and integrates related local repositories', async (t) => {

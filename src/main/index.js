@@ -437,6 +437,108 @@ async function saveGlobalGitIdentity({ name, email } = {}) {
   return { ok: true, name, email };
 }
 
+async function readProjectGitIdentity(repoPath) {
+  if (typeof repoPath !== 'string' || !repoPath.trim()) {
+    return { ok: false, error: 'Select a Git project first.' };
+  }
+
+  const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
+  if (!check.ok) {
+    return {
+      ok: false,
+      error: 'The selected folder is not a Git repository.',
+      raw: check.errorRaw,
+    };
+  }
+
+  const [localName, localEmail, effectiveName, effectiveEmail] = await Promise.all([
+    runGit(['config', '--local', '--get', 'user.name'], repoPath),
+    runGit(['config', '--local', '--get', 'user.email'], repoPath),
+    runGit(['config', '--get', 'user.name'], repoPath),
+    runGit(['config', '--get', 'user.email'], repoPath),
+  ]);
+  return {
+    ok: true,
+    scope: 'project',
+    name: localName.ok ? localName.stdout.trim() : '',
+    email: localEmail.ok ? localEmail.stdout.trim() : '',
+    effectiveName: effectiveName.ok ? effectiveName.stdout.trim() : '',
+    effectiveEmail: effectiveEmail.ok ? effectiveEmail.stdout.trim() : '',
+    hasNameOverride: localName.ok,
+    hasEmailOverride: localEmail.ok,
+  };
+}
+
+async function restoreProjectIdentityValue(repoPath, key, value, hadOverride) {
+  if (hadOverride) return runGit(['config', '--local', key, value], repoPath);
+  return runGit(['config', '--local', '--unset-all', key], repoPath);
+}
+
+async function saveProjectGitIdentity(repoPath, { name, email } = {}) {
+  name = String(name || '').trim();
+  email = String(email || '').trim();
+  if (!validIdentityValue(name) || !validIdentityValue(email)) {
+    return { ok: false, error: 'Name and email are required and must each fit on one line.' };
+  }
+
+  const previous = await readProjectGitIdentity(repoPath);
+  if (!previous.ok) return previous;
+
+  const setName = await runGit(['config', '--local', 'user.name', name], repoPath);
+  if (!setName.ok) {
+    return { ok: false, error: setName.errorSummary || 'Could not update the project Git name.', raw: setName.errorRaw };
+  }
+
+  const setEmail = await runGit(['config', '--local', 'user.email', email], repoPath);
+  if (!setEmail.ok) {
+    await restoreProjectIdentityValue(
+      repoPath,
+      'user.name',
+      previous.name,
+      previous.hasNameOverride
+    );
+    return { ok: false, error: setEmail.errorSummary || 'Could not update the project Git email.', raw: setEmail.errorRaw };
+  }
+
+  return {
+    ok: true,
+    scope: 'project',
+    name,
+    email,
+    effectiveName: name,
+    effectiveEmail: email,
+    hasNameOverride: true,
+    hasEmailOverride: true,
+  };
+}
+
+async function clearProjectGitIdentity(repoPath) {
+  const previous = await readProjectGitIdentity(repoPath);
+  if (!previous.ok) return previous;
+
+  if (previous.hasNameOverride) {
+    const unsetName = await runGit(['config', '--local', '--unset-all', 'user.name'], repoPath);
+    if (!unsetName.ok) {
+      return { ok: false, error: unsetName.errorSummary || 'Could not remove the project Git name.', raw: unsetName.errorRaw };
+    }
+  }
+
+  if (previous.hasEmailOverride) {
+    const unsetEmail = await runGit(['config', '--local', '--unset-all', 'user.email'], repoPath);
+    if (!unsetEmail.ok) {
+      await restoreProjectIdentityValue(
+        repoPath,
+        'user.name',
+        previous.name,
+        previous.hasNameOverride
+      );
+      return { ok: false, error: unsetEmail.errorSummary || 'Could not remove the project Git email.', raw: unsetEmail.errorRaw };
+    }
+  }
+
+  return await readProjectGitIdentity(repoPath);
+}
+
 function parseCommitHistory(stdout) {
   return String(stdout || '')
     .split(COMMIT_RECORD_SEP)
@@ -596,7 +698,7 @@ async function rewriteCommitMetadata({
       readCommitObject(repoPath, commit),
     ]);
     if ((authorMode === 'global' || committerMode === 'global') && (!identity.name || !identity.email)) {
-      return { ok: false, error: 'Save a global Git name and email before using the global identity.' };
+      return { ok: false, error: 'Set a global Git name and email in Identity Tool before using the global identity.' };
     }
     if (!status.ok) return { ok: false, error: status.errorSummary || 'Could not inspect the working tree.', raw: status.errorRaw };
     if (status.stdout.trim()) return { ok: false, error: 'This project has uncommitted changes. Commit or stash them before rewriting history.' };
@@ -782,8 +884,27 @@ async function rewriteCommitMetadata({
   }
 }
 
-ipcMain.handle('commit-tool-get-global-identity', () => readGlobalGitIdentity());
-ipcMain.handle('commit-tool-save-global-identity', (_, identity) => saveGlobalGitIdentity(identity));
+ipcMain.handle('identity-get', async (_, { scope = 'global', repoPath = '' } = {}) => {
+  if (scope === 'project') return await readProjectGitIdentity(repoPath);
+  if (scope !== 'global') return { ok: false, error: 'Invalid identity scope.' };
+  const result = await readGlobalGitIdentity();
+  return {
+    ...result,
+    scope: 'global',
+    effectiveName: result.name,
+    effectiveEmail: result.email,
+    hasNameOverride: Boolean(result.name),
+    hasEmailOverride: Boolean(result.email),
+  };
+});
+ipcMain.handle('identity-save', async (_, { scope = 'global', repoPath = '', name = '', email = '' } = {}) => {
+  if (scope === 'project') return await saveProjectGitIdentity(repoPath, { name, email });
+  if (scope !== 'global') return { ok: false, error: 'Invalid identity scope.' };
+  return await saveGlobalGitIdentity({ name, email });
+});
+ipcMain.handle('identity-clear-project', async (_, repoPath) => {
+  return await clearProjectGitIdentity(repoPath);
+});
 ipcMain.handle('commit-tool-history', (_, repoPath, limit) => commitToolHistory(repoPath, limit));
 ipcMain.handle('commit-tool-detail', (_, repoPath, commit) => commitToolDetail(repoPath, commit));
 ipcMain.handle('commit-tool-rewrite', (_, payload) => rewriteCommitMetadata(payload));

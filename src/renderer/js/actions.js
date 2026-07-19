@@ -389,6 +389,16 @@ export async function fetchFolderProjects(folder) {
   await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
 }
 
+export async function pullFolderProjects(folder) {
+  const targets = folder.items.filter((p) => p.branches);
+  await runBatchOp('Pulling', targets, (repoPath) => window.api.pull(repoPath));
+}
+
+export async function pushFolderProjects(folder) {
+  const targets = folder.items.filter((p) => p.branches);
+  await runBatchOp('Pushing', targets, (repoPath) => window.api.push(repoPath));
+}
+
 export async function batchOp(opName, opFn) {
   const targets = getProjects().filter((p) => p.selected && p.branches);
   await runBatchOp(opName, targets, opFn);
