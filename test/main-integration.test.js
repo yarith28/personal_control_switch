@@ -108,6 +108,18 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal((await git(second, 'branch', '--show-current')).stdout.trim(), 'feature/new-control');
   assert.equal((await handlers.get('create-branch')(null, second, 'invalid branch name')).ok, false);
 
+  const noUpstream = await handlers.get('push')(progressEvent, second);
+  assert.equal(noUpstream.ok, false);
+  assert.equal(noUpstream.errorCode, 'NO_UPSTREAM');
+  const setupPush = await handlers.get('push-set-upstream')(progressEvent, second);
+  assert.equal(setupPush.ok, true, setupPush.errorSummary);
+  assert.equal(setupPush.remote, 'origin');
+  assert.equal(setupPush.branch, 'feature/new-control');
+  assert.equal(
+    (await git(second, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')).stdout.trim(),
+    'origin/feature/new-control'
+  );
+
   const projectIdentity = await handlers.get('identity-get')(
     null,
     { scope: 'project', repoPath: second }

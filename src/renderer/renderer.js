@@ -9,7 +9,7 @@ import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
 import { FONTS, applyFont, buildFontPicker } from './js/fonts.js';
 import { persist } from './js/persist.js';
 import { refreshAll } from './js/branches.js';
-import { addProject, batchOp, fetchAllProjects } from './js/actions.js';
+import { addProject, batchOp, fetchAllProjects, pushWithUpstreamPrompt } from './js/actions.js';
 import { addFolder } from './js/render-folder.js';
 import { renderProjects } from './js/render-list.js';
 import { setMultiSelect, setOrganizeMode } from './js/modes.js';
@@ -77,7 +77,7 @@ pullSelectedBtn.addEventListener('click', () =>
   withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (p) => window.api.pull(p)))
 );
 pushSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(pushSelectedBtn, () => batchOp('Pushing', (p) => window.api.push(p)))
+  withButtonLoading(pushSelectedBtn, () => batchOp('Pushing', pushWithUpstreamPrompt))
 );
 fetchSelectedBtn.addEventListener('click', () =>
   withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (p) => window.api.fetch(p)))

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   createBranch: (repoPath, branch) => ipcRenderer.invoke('create-branch', repoPath, branch),
   pull: (repoPath) => ipcRenderer.invoke('pull', repoPath),
   push: (repoPath) => ipcRenderer.invoke('push', repoPath),
+  pushSetUpstream: (repoPath) => ipcRenderer.invoke('push-set-upstream', repoPath),
   cancelGit: (repoPath) => ipcRenderer.invoke('cancel-git', repoPath),
   confirmDialog: (opts) => ipcRenderer.invoke('confirm-dialog', opts),
   getPlatform: () => ipcRenderer.invoke('get-platform'),

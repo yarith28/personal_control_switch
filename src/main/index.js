@@ -370,6 +370,69 @@ ipcMain.handle('push', async (event, repoPath) => {
   });
 });
 
+async function resolvePushSetupTarget(repoPath) {
+  const [branchResult, remotesResult] = await Promise.all([
+    runGit(['branch', '--show-current'], repoPath),
+    runGit(['remote'], repoPath),
+  ]);
+  if (!branchResult.ok) return branchResult;
+  if (!remotesResult.ok) return remotesResult;
+
+  const branch = branchResult.stdout.trim();
+  if (!branch) {
+    return {
+      ok: false,
+      errorCode: 'DETACHED_HEAD',
+      errorSummary: 'Check out a local branch before setting an upstream.',
+      errorRaw: '',
+    };
+  }
+
+  const remotes = remotesResult.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  if (!remotes.length) {
+    return {
+      ok: false,
+      errorCode: 'NO_REMOTE',
+      errorSummary: 'Add a Git remote before setting an upstream branch.',
+      errorRaw: '',
+    };
+  }
+
+  const configKeys = [
+    `branch.${branch}.pushRemote`,
+    'remote.pushDefault',
+    `branch.${branch}.remote`,
+  ];
+  const configured = await Promise.all(configKeys.map((key) => runGit(['config', '--get', key], repoPath)));
+  const preferred = configured
+    .filter((result) => result.ok)
+    .map((result) => result.stdout.trim())
+    .find((remote) => remotes.includes(remote));
+  const remote = preferred || (remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : '');
+
+  if (!remote) {
+    return {
+      ok: false,
+      errorCode: 'AMBIGUOUS_REMOTE',
+      errorSummary: 'Choose a default push remote before setting an upstream branch.',
+      errorRaw: `Available remotes: ${remotes.join(', ')}`,
+    };
+  }
+
+  return { ok: true, branch, remote };
+}
+
+ipcMain.handle('push-set-upstream', async (event, repoPath) => {
+  const target = await resolvePushSetupTarget(repoPath);
+  if (!target.ok) return target;
+  const result = await runGitStreaming(
+    ['push', '--set-upstream', target.remote, target.branch],
+    repoPath,
+    (payload) => event.sender.send('git-progress', { repoPath, ...payload })
+  );
+  return { ...result, branch: target.branch, remote: target.remote };
+});
+
 ipcMain.handle('cancel-git', (_, repoPath) => cancelRepoOperations(repoPath));
 
 ipcMain.handle('confirm-dialog', async (e, { message, detail }) => {

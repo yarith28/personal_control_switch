@@ -17,10 +17,13 @@ async function withRepo(t) {
 }
 
 test('Git failures receive actionable summaries', () => {
-  assert.equal(
-    classifyGitFailure(['push'], '', 'fatal: The current branch main has no upstream branch.').summary,
-    'No upstream branch is set for this branch.'
+  const noUpstream = classifyGitFailure(
+    ['push'],
+    '',
+    'fatal: The current branch main has no upstream branch.'
   );
+  assert.equal(noUpstream.summary, 'No upstream branch is set for this branch.');
+  assert.equal(noUpstream.code, 'NO_UPSTREAM');
   assert.equal(
     classifyGitFailure(['pull'], '', 'CONFLICT (content): Merge conflict in file.txt').summary,
     'Pull stopped because Git found merge conflicts that need manual resolution.'

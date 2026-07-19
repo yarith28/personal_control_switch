@@ -83,6 +83,7 @@ function classifyGitFailure(args, stdout, stderr) {
 
   if (command === 'push' && has('has no upstream branch', 'no upstream branch')) {
     return {
+      code: 'NO_UPSTREAM',
       summary: 'No upstream branch is set for this branch.',
       raw,
     };
@@ -118,6 +119,7 @@ function classifyGitFailure(args, stdout, stderr) {
     has('there is no tracking information', 'no upstream configured for branch')
   ) {
     return {
+      ...(command === 'push' ? { code: 'NO_UPSTREAM' } : {}),
       summary: 'No upstream branch is configured for the current branch.',
       raw,
     };
@@ -176,6 +178,7 @@ function finalizeGitResult(args, result) {
   const failure = classifyGitFailure(args, result.stdout, result.stderr);
   return {
     ...result,
+    ...(failure.code ? { errorCode: failure.code } : {}),
     errorSummary: failure.summary,
     errorRaw: failure.raw,
   };

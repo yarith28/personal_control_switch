@@ -72,7 +72,7 @@ The included packaging configuration does not sign installers. Public distributi
 
 ## Safety and recovery
 
-- Pull and push use Git's existing behavior and configuration. The app does not choose a merge or rebase strategy for you.
+- Pull and push use Git's existing behavior and configuration. If a push has no upstream, the app can set one after confirmation using the configured push remote, `origin`, or the repository's only remote. The app does not choose a merge or rebase strategy for you.
 - Git credential prompts are disabled inside the app so an operation cannot wait on an invisible terminal prompt. Configure credentials with your normal Git tooling.
 - Fetch, pull, and push can be cancelled from the repository row. Network operations time out after five minutes; other Git commands time out after two minutes.
 - Commit Tool only rewrites clean, linear local history. It creates a temporary backup branch, updates the branch with compare-and-swap semantics, verifies the result, and attempts an automatic rollback if verification fails.

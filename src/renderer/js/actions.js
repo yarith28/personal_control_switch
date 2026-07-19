@@ -10,6 +10,7 @@ import { setRowBusy, setRowCancellable, setRowStatus } from './render-row.js';
 import { confirmDialog, promptDialog } from './modal.js';
 
 const LONG_RUNNING_WARNING_MS = 8000;
+let pushSetupPromptQueue = Promise.resolve();
 
 function startLongRunningWarning(project, actionLabel) {
   const projectName = basename(project.path);
@@ -68,6 +69,36 @@ function completedActionLabel(opName) {
     default:
       return opName.replace(/ing$/i, '');
   }
+}
+
+function confirmPushSetup(projectName) {
+  const pending = pushSetupPromptQueue.then(() => confirmDialog({
+    message: `Set up an upstream branch for "${projectName}"?`,
+    detail: 'The current branch has no upstream. This will use its configured push remote (or origin), create the matching remote branch, set it as upstream, and retry the push.',
+    confirmText: 'Set up & push',
+    danger: false,
+  }));
+  pushSetupPromptQueue = pending.catch(() => false);
+  return pending;
+}
+
+export async function pushWithUpstreamPrompt(repoPath) {
+  const result = await window.api.push(repoPath);
+  if (result?.ok || result?.errorCode !== 'NO_UPSTREAM') return result;
+
+  const projectName = basename(repoPath);
+  const confirmed = await confirmPushSetup(projectName);
+  if (!confirmed) {
+    return {
+      ...result,
+      cancelled: true,
+      errorSummary: 'Push cancelled.',
+      errorRaw: '',
+    };
+  }
+
+  log(`[${projectName}] setting upstream and retrying push...`, true);
+  return await window.api.pushSetUpstream(repoPath);
 }
 
 async function runProjectAction(project, {
@@ -183,7 +214,7 @@ export async function doPush(project) {
     startLabel: 'Pushing',
     successLabel: 'push complete',
     failureLabel: 'push failed',
-    action: (repoPath) => window.api.push(repoPath),
+    action: pushWithUpstreamPrompt,
     warnLongRunning: true,
     notifyOnFailure: true,
     cancellable: true,
@@ -332,6 +363,7 @@ async function runBatchOp(opName, targets, opFn) {
   const baseAction = opName.replace(/ing$/i, '').toLowerCase();
   let okCount = 0;
   let failCount = 0;
+  let cancelCount = 0;
 
   // Mark every queued project so the user can see what is waiting next.
   targets.forEach((p) => {
@@ -354,12 +386,14 @@ async function runBatchOp(opName, targets, opFn) {
       const results = await Promise.all(targets.map((p) => runProjectAction(p, projectOpts)));
       for (const res of results) {
         if (res?.ok) okCount += 1;
+        else if (res?.cancelled) cancelCount += 1;
         else failCount += 1;
       }
     } else {
       for (const project of targets) {
         const res = await runProjectAction(project, projectOpts);
         if (res?.ok) okCount += 1;
+        else if (res?.cancelled) cancelCount += 1;
         else failCount += 1;
       }
     }
@@ -372,7 +406,7 @@ async function runBatchOp(opName, targets, opFn) {
 
   if (failCount > 0) {
     const completed = completedActionLabel(opName);
-    const body = `${okCount} succeeded, ${failCount} failed.`;
+    const body = `${okCount} succeeded, ${failCount} failed${cancelCount ? `, ${cancelCount} cancelled` : ''}.`;
     await notifyUser(`${completed} finished`, body, {
       tone: 'error',
     });
@@ -396,7 +430,7 @@ export async function pullFolderProjects(folder) {
 
 export async function pushFolderProjects(folder) {
   const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Pushing', targets, (repoPath) => window.api.push(repoPath));
+  await runBatchOp('Pushing', targets, pushWithUpstreamPrompt);
 }
 
 export async function batchOp(opName, opFn) {
