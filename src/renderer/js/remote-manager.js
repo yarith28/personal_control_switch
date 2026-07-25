@@ -98,6 +98,7 @@ export function openRemoteManager(project, { onChange } = {}) {
   let gitRemotes = [];
   let closed = false;
   let busy = false;
+  let addRemoteDialog = null;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay remote-manager-overlay';
@@ -121,47 +122,15 @@ export function openRemoteManager(project, { onChange } = {}) {
   intro.className = 'remote-manager-intro';
   intro.textContent = 'Select the URL each repository remote should use.';
   headingWrap.append(eyebrow, title, intro);
+  const headerActions = document.createElement('div');
+  headerActions.className = 'remote-manager-header-actions';
+  const addRemoteButton = iconButton('remote-manager-add', 'plus', 'Add Git remote');
   const closeButton = iconButton('remote-manager-close', 'x', 'Close remote manager');
-  header.append(headingWrap, closeButton);
+  headerActions.append(addRemoteButton, closeButton);
+  header.append(headingWrap, headerActions);
 
   const list = document.createElement('div');
   list.className = 'remote-manager-list remote-group-list';
-
-  const addRemotePanel = document.createElement('div');
-  addRemotePanel.className = 'remote-add-panel';
-  const addRemoteButton = textButton('remote-add-remote', 'plus', 'Add remote');
-  const addRemoteForm = document.createElement('form');
-  addRemoteForm.className = 'remote-add-form';
-  addRemoteForm.hidden = true;
-  const addRemoteName = document.createElement('input');
-  addRemoteName.type = 'text';
-  addRemoteName.placeholder = 'Remote name';
-  addRemoteName.autocomplete = 'off';
-  addRemoteName.spellcheck = false;
-  addRemoteName.setAttribute('aria-label', 'New remote name');
-  const addRemoteUrl = document.createElement('input');
-  addRemoteUrl.type = 'text';
-  addRemoteUrl.placeholder = 'Remote URL or local path';
-  addRemoteUrl.autocomplete = 'off';
-  addRemoteUrl.spellcheck = false;
-  addRemoteUrl.setAttribute('aria-label', 'New remote URL');
-  const addRemoteActions = document.createElement('div');
-  addRemoteActions.className = 'remote-add-form-actions';
-  const cancelAddRemote = document.createElement('button');
-  cancelAddRemote.type = 'button';
-  cancelAddRemote.className = 'btn remote-form-cancel';
-  cancelAddRemote.textContent = 'Cancel';
-  const testAddRemote = document.createElement('button');
-  testAddRemote.type = 'button';
-  testAddRemote.className = 'btn remote-form-test';
-  testAddRemote.textContent = 'Test';
-  const saveAddRemote = document.createElement('button');
-  saveAddRemote.type = 'submit';
-  saveAddRemote.className = 'btn remote-form-save';
-  saveAddRemote.textContent = 'Add';
-  addRemoteActions.append(cancelAddRemote, testAddRemote, saveAddRemote);
-  addRemoteForm.append(addRemoteName, addRemoteUrl, addRemoteActions);
-  addRemotePanel.append(addRemoteButton, addRemoteForm);
 
   const status = document.createElement('div');
   status.className = 'remote-manager-status';
@@ -175,13 +144,14 @@ export function openRemoteManager(project, { onChange } = {}) {
   doneButton.textContent = 'Done';
   footer.appendChild(doneButton);
 
-  card.append(header, list, addRemotePanel, status, footer);
+  card.append(header, list, status, footer);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
   const close = () => {
     if (closed) return;
     closed = true;
+    addRemoteDialog?.close(true);
     overlay.classList.remove('open');
     document.removeEventListener('keydown', onKeydown);
     setTimeout(() => overlay.remove(), 180);
@@ -200,9 +170,8 @@ export function openRemoteManager(project, { onChange } = {}) {
 
   const setBusy = (value) => {
     busy = value;
-    card.querySelectorAll(
-      '.remote-manager-list button, .remote-manager-list input, .remote-add-panel button, .remote-add-panel input'
-    ).forEach((control) => {
+    addRemoteButton.disabled = value;
+    card.querySelectorAll('.remote-manager-list button, .remote-manager-list input').forEach((control) => {
       control.disabled = value;
     });
   };
@@ -490,95 +459,218 @@ export function openRemoteManager(project, { onChange } = {}) {
     delete project.selectedRemoteName;
   };
 
-  const hideAddRemote = () => {
-    addRemoteName.value = '';
-    addRemoteUrl.value = '';
-    addRemoteForm.hidden = true;
-    addRemoteButton.hidden = false;
-  };
-
-  const validateAddRemote = () => {
-    const name = addRemoteName.value.trim();
-    if (!name) {
-      setStatus('Enter a remote name.', 'error');
-      return null;
-    }
-    if (name.length > 255 || /\p{Cc}/u.test(name)) {
-      setStatus('Enter a valid Git remote name.', 'error');
-      return null;
-    }
-    const url = validateRemoteUrl(addRemoteUrl.value);
-    if (!url.ok) {
-      setStatus(url.error, 'error');
-      return null;
-    }
-    return { name, url: url.url };
-  };
-
-  addRemoteButton.addEventListener('click', () => {
-    addRemoteForm.hidden = false;
-    addRemoteButton.hidden = true;
+  const openAddRemoteDialog = () => {
+    if (closed || busy || addRemoteDialog) return;
     setStatus();
-    addRemoteName.focus();
-  });
-  cancelAddRemote.addEventListener('click', hideAddRemote);
 
-  testAddRemote.addEventListener('click', async () => {
-    const draft = validateAddRemote();
-    if (!draft) return;
-    testAddRemote.disabled = true;
-    saveAddRemote.disabled = true;
-    setStatus(`Connecting to ${draft.name}...`);
-    try {
-      const result = await window.api.testAppRemote(project.path, {
-        id: makeRemoteId(project.remoteUrls),
-        name: draft.name,
-        url: draft.url,
+    const dialogOverlay = document.createElement('div');
+    dialogOverlay.className = 'modal-overlay remote-add-dialog-overlay';
+    const dialogCard = document.createElement('div');
+    dialogCard.className = 'modal-card remote-add-dialog-card';
+    dialogCard.setAttribute('role', 'dialog');
+    dialogCard.setAttribute('aria-modal', 'true');
+    dialogCard.setAttribute('aria-labelledby', 'remote-add-dialog-title');
+    dialogCard.setAttribute('aria-describedby', 'remote-add-dialog-intro');
+
+    const dialogHeader = document.createElement('div');
+    dialogHeader.className = 'remote-add-dialog-header';
+    const dialogHeading = document.createElement('div');
+    const dialogTitle = document.createElement('div');
+    dialogTitle.className = 'modal-message';
+    dialogTitle.id = 'remote-add-dialog-title';
+    dialogTitle.textContent = 'Add Git remote';
+    const dialogIntro = document.createElement('div');
+    dialogIntro.className = 'remote-add-dialog-intro';
+    dialogIntro.id = 'remote-add-dialog-intro';
+    dialogIntro.textContent = 'Add a named remote to this repository.';
+    dialogHeading.append(dialogTitle, dialogIntro);
+    const dialogCloseButton = iconButton(
+      'remote-add-dialog-close',
+      'x',
+      'Close add remote dialog'
+    );
+    dialogHeader.append(dialogHeading, dialogCloseButton);
+
+    const form = document.createElement('form');
+    form.className = 'remote-add-dialog-form';
+    const nameField = document.createElement('label');
+    nameField.className = 'remote-add-dialog-field';
+    const nameLabel = document.createElement('span');
+    nameLabel.textContent = 'Remote name';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = 'origin';
+    nameInput.autocomplete = 'off';
+    nameInput.spellcheck = false;
+    nameField.append(nameLabel, nameInput);
+
+    const urlField = document.createElement('label');
+    urlField.className = 'remote-add-dialog-field';
+    const urlLabel = document.createElement('span');
+    urlLabel.textContent = 'Remote URL or local path';
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text';
+    urlInput.placeholder = 'git@host:owner/repository.git';
+    urlInput.autocomplete = 'off';
+    urlInput.spellcheck = false;
+    urlField.append(urlLabel, urlInput);
+
+    const dialogStatus = document.createElement('div');
+    dialogStatus.className = 'remote-add-dialog-status';
+    dialogStatus.setAttribute('aria-live', 'polite');
+
+    const dialogActions = document.createElement('div');
+    dialogActions.className = 'modal-actions remote-add-dialog-actions';
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'btn remote-form-cancel';
+    cancelButton.textContent = 'Cancel';
+    const testButton = document.createElement('button');
+    testButton.type = 'button';
+    testButton.className = 'btn remote-form-test';
+    testButton.textContent = 'Test';
+    const saveButton = document.createElement('button');
+    saveButton.type = 'submit';
+    saveButton.className = 'btn remote-form-save';
+    saveButton.textContent = 'Add';
+    dialogActions.append(cancelButton, testButton, saveButton);
+    form.append(nameField, urlField, dialogStatus, dialogActions);
+    dialogCard.append(dialogHeader, form);
+    dialogOverlay.appendChild(dialogCard);
+    document.body.appendChild(dialogOverlay);
+
+    let dialogClosed = false;
+    let dialogBusy = false;
+
+    const setDialogStatus = (message = '', tone = '') => {
+      dialogStatus.textContent = message;
+      dialogStatus.classList.toggle('error', tone === 'error');
+      dialogStatus.classList.toggle('success', tone === 'success');
+    };
+
+    const setDialogBusy = (value) => {
+      dialogBusy = value;
+      dialogCard.querySelectorAll('button, input').forEach((control) => {
+        control.disabled = value;
       });
-      setStatus(
-        result.ok ? 'Connection successful.' : (result.errorSummary || 'Connection failed.'),
-        result.ok ? 'success' : 'error'
-      );
-    } finally {
-      testAddRemote.disabled = false;
-      saveAddRemote.disabled = false;
-    }
-  });
+    };
 
-  addRemoteForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const draft = validateAddRemote();
-    if (!draft) return;
-    if (gitRemotes.some((remote) => remote.name === draft.name)) {
-      setStatus(`Remote ${draft.name} already exists.`, 'error');
-      return;
-    }
+    const closeDialog = (force = false) => {
+      if (dialogClosed || (dialogBusy && !force)) return;
+      dialogClosed = true;
+      document.removeEventListener('keydown', onDialogKeydown);
+      dialogOverlay.classList.remove('open');
+      addRemoteDialog = null;
+      if (force) dialogOverlay.remove();
+      else setTimeout(() => dialogOverlay.remove(), 180);
+      if (!closed) addRemoteButton.focus();
+    };
 
-    setBusy(true);
-    setStatus(`Adding ${draft.name}...`);
-    try {
-      const result = await window.api.addGitRemote(
-        project.path,
-        draft.name,
-        draft.url
-      );
-      if (!result.ok) {
-        setStatus(result.errorSummary || `Could not add ${draft.name}.`, 'error');
+    const validateDraft = () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        setDialogStatus('Enter a remote name.', 'error');
+        nameInput.focus();
+        return null;
+      }
+      if (name.length > 255 || /\p{Cc}/u.test(name)) {
+        setDialogStatus('Enter a valid Git remote name.', 'error');
+        nameInput.focus();
+        return null;
+      }
+      const url = validateRemoteUrl(urlInput.value);
+      if (!url.ok) {
+        setDialogStatus(url.error, 'error');
+        urlInput.focus();
+        return null;
+      }
+      return { name, url: url.url };
+    };
+
+    const onDialogKeydown = (event) => {
+      if (event.key === 'Escape') closeDialog();
+    };
+
+    addRemoteDialog = { close: closeDialog };
+    dialogCloseButton.addEventListener('click', () => closeDialog());
+    cancelButton.addEventListener('click', () => closeDialog());
+    dialogOverlay.addEventListener('click', (event) => {
+      if (event.target === dialogOverlay) closeDialog();
+    });
+    document.addEventListener('keydown', onDialogKeydown);
+
+    testButton.addEventListener('click', async () => {
+      const draft = validateDraft();
+      if (!draft) return;
+      setDialogBusy(true);
+      setDialogStatus(`Connecting to ${draft.name}...`);
+      try {
+        const result = await window.api.testAppRemote(project.path, {
+          id: makeRemoteId(project.remoteUrls),
+          name: draft.name,
+          url: draft.url,
+        });
+        if (dialogClosed) return;
+        setDialogStatus(
+          result.ok ? 'Connection successful.' : (result.errorSummary || 'Connection failed.'),
+          result.ok ? 'success' : 'error'
+        );
+      } catch (error) {
+        if (!dialogClosed) {
+          setDialogStatus(error?.message || 'Connection failed.', 'error');
+        }
+      } finally {
+        if (!dialogClosed) setDialogBusy(false);
+      }
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const draft = validateDraft();
+      if (!draft) return;
+      if (gitRemotes.some((remote) => remote.name === draft.name)) {
+        setDialogStatus(`Remote ${draft.name} already exists.`, 'error');
+        nameInput.focus();
         return;
       }
-      gitRemotes.push(result.remote);
-      project.gitRemoteNames = gitRemotes.map((remote) => remote.name);
-      importConfiguredUrls();
-      hideAddRemote();
-      renderGroups();
-      setStatus(`Added remote ${draft.name}.`, 'success');
-      await notifyChange({ refresh: true });
-    } catch (error) {
-      setStatus(error?.message || `Could not add ${draft.name}.`, 'error');
-    } finally {
-      setBusy(false);
-    }
-  });
+
+      setDialogBusy(true);
+      setDialogStatus(`Adding ${draft.name}...`);
+      try {
+        const result = await window.api.addGitRemote(
+          project.path,
+          draft.name,
+          draft.url
+        );
+        if (dialogClosed) return;
+        if (!result.ok) {
+          setDialogStatus(result.errorSummary || `Could not add ${draft.name}.`, 'error');
+          return;
+        }
+        gitRemotes.push(result.remote);
+        project.gitRemoteNames = gitRemotes.map((remote) => remote.name);
+        importConfiguredUrls();
+        renderGroups();
+        await notifyChange({ refresh: true });
+        if (dialogClosed) return;
+        setDialogBusy(false);
+        closeDialog();
+      } catch (error) {
+        if (!dialogClosed) {
+          setDialogStatus(error?.message || `Could not add ${draft.name}.`, 'error');
+        }
+      } finally {
+        if (!dialogClosed) setDialogBusy(false);
+      }
+    });
+
+    requestAnimationFrame(() => {
+      dialogOverlay.classList.add('open');
+      nameInput.focus();
+    });
+  };
+
+  addRemoteButton.addEventListener('click', openAddRemoteDialog);
 
   closeButton.addEventListener('click', close);
   doneButton.addEventListener('click', close);
@@ -588,6 +680,7 @@ export function openRemoteManager(project, { onChange } = {}) {
   const onKeydown = (event) => {
     if (event.key !== 'Escape') return;
     if (!document.getElementById('confirm-modal')?.hidden) return;
+    if (addRemoteDialog) return;
     close();
   };
   document.addEventListener('keydown', onKeydown);
@@ -609,9 +702,6 @@ export function openRemoteManager(project, { onChange } = {}) {
       migrateAndImport();
       renderGroups();
       await notifyChange();
-      if (!gitRemotes.length) {
-        setStatus('Add a Git remote before managing its URLs.', 'error');
-      }
     })
     .catch((error) => {
       if (closed) return;
