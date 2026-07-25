@@ -1,6 +1,5 @@
 import {
   normalizeAppRemotes,
-  selectedAppRemote,
   validateAppRemoteDraft,
 } from './app-remotes.mjs';
 import { persist } from './persist.js';
@@ -29,31 +28,48 @@ function buttonWithIcon(className, icon, label) {
   return button;
 }
 
+function remoteFromUpstream(project) {
+  const upstream = String(project?.upstream || '');
+  const names = Array.isArray(project?.gitRemoteNames) ? project.gitRemoteNames : [];
+  const matched = names
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .find((name) => upstream.startsWith(`${name}/`));
+  if (matched) return matched;
+  return names.length ? '' : upstream.split('/')[0] || '';
+}
+
+function preferredRemoteName(project, remotes) {
+  const names = remotes.map((remote) => remote.name);
+  if (names.includes(project.selectedRemoteName)) return project.selectedRemoteName;
+  const upstreamRemote = remoteFromUpstream({ ...project, gitRemoteNames: names });
+  if (upstreamRemote) return upstreamRemote;
+  if (names.includes('origin')) return 'origin';
+  return names[0] || '';
+}
+
 export function createRemoteTag(project, { disabled = () => false, onChange } = {}) {
   const tag = document.createElement('button');
   tag.type = 'button';
   tag.className = 'name-remote';
 
   const sync = () => {
-    const remote = selectedAppRemote(project);
-    tag.textContent = remote?.name || 'Remote';
-    tag.classList.toggle('unset', !remote);
-    tag.title = remote
-      ? `App remote: ${remote.name}\n${remote.url}`
-      : 'Choose an app-managed remote';
-    tag.setAttribute(
-      'aria-label',
-      remote ? `Remote ${remote.name}. Open remote manager.` : 'No app remote selected. Open remote manager.'
-    );
+    const name = project.selectedRemoteName || remoteFromUpstream(project) || 'Remote';
+    tag.textContent = name;
+    tag.classList.toggle('unset', name === 'Remote');
+    tag.title = name === 'Remote'
+      ? 'Open remote manager'
+      : `Manage the URL for ${name}`;
+    tag.setAttribute('aria-label', `${tag.title}.`);
   };
 
   tag.addEventListener('click', (event) => {
     event.stopPropagation();
     if (disabled()) return;
     openRemoteManager(project, {
-      onChange: async () => {
+      onChange: async ({ refresh = false } = {}) => {
         sync();
-        await onChange?.();
+        if (refresh) await onChange?.();
       },
     });
   });
@@ -64,12 +80,13 @@ export function createRemoteTag(project, { disabled = () => false, onChange } = 
 export function openRemoteManager(project, { onChange } = {}) {
   document.querySelector('.remote-manager-overlay')?.remove();
   project.appRemotes = normalizeAppRemotes(project.appRemotes);
-  if (!project.appRemotes.some((remote) => remote.id === project.selectedRemoteId)) {
-    project.selectedRemoteId = null;
-  }
+  project.selectedRemoteId = null;
 
   let editingId = null;
+  let gitRemotes = [];
+  let selectedRemoteName = '';
   let closed = false;
+  let swapping = false;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay remote-manager-overlay';
@@ -91,10 +108,33 @@ export function openRemoteManager(project, { onChange } = {}) {
   title.textContent = 'Remote manager';
   const intro = document.createElement('div');
   intro.className = 'remote-manager-intro';
-  intro.textContent = 'The selected URL is used for fetch, pull, and push. Git configuration is not changed.';
+  intro.textContent = 'Choose a repository remote, then swap its Git URL to one of your saved targets.';
   headingWrap.append(eyebrow, title, intro);
   const closeButton = buttonWithIcon('remote-manager-close', 'x', 'Close remote manager');
   header.append(headingWrap, closeButton);
+
+  const targetPanel = document.createElement('div');
+  targetPanel.className = 'remote-target-panel';
+  const targetLabel = document.createElement('label');
+  targetLabel.className = 'remote-target-field';
+  const targetCaption = document.createElement('span');
+  targetCaption.textContent = 'Repository remote';
+  const targetSelect = document.createElement('select');
+  targetSelect.setAttribute('aria-label', 'Repository remote to update');
+  targetLabel.append(targetCaption, targetSelect);
+  const currentWrap = document.createElement('div');
+  currentWrap.className = 'remote-current';
+  const currentCaption = document.createElement('span');
+  currentCaption.className = 'remote-current-caption';
+  currentCaption.textContent = 'Current URL';
+  const currentUrl = document.createElement('span');
+  currentUrl.className = 'remote-current-url';
+  currentUrl.textContent = 'Reading Git configuration...';
+  const pushUrlNote = document.createElement('span');
+  pushUrlNote.className = 'remote-push-url-note';
+  pushUrlNote.hidden = true;
+  currentWrap.append(currentCaption, currentUrl, pushUrlNote);
+  targetPanel.append(targetLabel, currentWrap);
 
   const list = document.createElement('div');
   list.className = 'remote-manager-list';
@@ -103,17 +143,17 @@ export function openRemoteManager(project, { onChange } = {}) {
   form.className = 'remote-manager-form';
   const formTitle = document.createElement('div');
   formTitle.className = 'remote-form-title';
-  formTitle.textContent = 'Add remote';
+  formTitle.textContent = 'Add URL target';
   const fields = document.createElement('div');
   fields.className = 'remote-form-fields';
 
   const nameLabel = document.createElement('label');
   nameLabel.className = 'remote-form-field';
   const nameCaption = document.createElement('span');
-  nameCaption.textContent = 'Name';
+  nameCaption.textContent = 'Target name';
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
-  nameInput.placeholder = 'origin';
+  nameInput.placeholder = 'Work';
   nameInput.autocomplete = 'off';
   nameInput.spellcheck = false;
   nameLabel.append(nameCaption, nameInput);
@@ -147,7 +187,7 @@ export function openRemoteManager(project, { onChange } = {}) {
   const saveButton = document.createElement('button');
   saveButton.type = 'submit';
   saveButton.className = 'btn remote-form-save';
-  saveButton.textContent = 'Add & select';
+  saveButton.textContent = 'Add & use';
   formActions.append(cancelEditButton, testButton, saveButton);
   form.append(formTitle, fields, formStatus, formActions);
 
@@ -159,7 +199,7 @@ export function openRemoteManager(project, { onChange } = {}) {
   doneButton.textContent = 'Done';
   footer.appendChild(doneButton);
 
-  card.append(header, list, form, footer);
+  card.append(header, targetPanel, list, form, footer);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
@@ -177,103 +217,155 @@ export function openRemoteManager(project, { onChange } = {}) {
     formStatus.classList.toggle('success', tone === 'success');
   };
 
+  const currentRemote = () => (
+    gitRemotes.find((remote) => remote.name === selectedRemoteName) || null
+  );
+
+  const renderCurrentRemote = () => {
+    const remote = currentRemote();
+    currentUrl.textContent = remote?.url || (gitRemotes.length ? 'URL unavailable' : 'No Git remotes');
+    currentUrl.title = remote?.url || '';
+    const hasSeparatePushUrl = !!remote?.pushUrl && remote.pushUrl !== remote.url;
+    pushUrlNote.hidden = !hasSeparatePushUrl;
+    pushUrlNote.textContent = hasSeparatePushUrl
+      ? `Push URL is separate and will stay unchanged: ${remote.pushUrl}`
+      : '';
+    pushUrlNote.title = hasSeparatePushUrl ? remote.pushUrl : '';
+  };
+
   const resetForm = () => {
     editingId = null;
     nameInput.value = '';
     urlInput.value = '';
-    formTitle.textContent = 'Add remote';
-    saveButton.textContent = 'Add & select';
+    formTitle.textContent = 'Add URL target';
+    saveButton.textContent = 'Add & use';
     cancelEditButton.hidden = true;
     setStatus();
   };
 
-  const notifyChange = async () => {
+  const notifyChange = async ({ refresh = false } = {}) => {
     await persist();
-    await onChange?.();
+    await onChange?.({ refresh });
   };
 
-  const selectRemote = async (id) => {
-    project.selectedRemoteId = id;
-    renderList();
-    await notifyChange();
+  const setSwapping = (busy) => {
+    swapping = busy;
+    targetSelect.disabled = busy || !gitRemotes.length;
+    saveButton.disabled = busy;
+    testButton.disabled = busy;
+    list.querySelectorAll('button').forEach((button) => {
+      button.disabled = busy;
+    });
+  };
+
+  const useTarget = async (target) => {
+    if (swapping) return false;
+    const remote = currentRemote();
+    if (!remote) {
+      setStatus('Choose an existing repository remote first.', 'error');
+      return false;
+    }
+    if (remote.url === target.url) {
+      setStatus(`${remote.name} already uses ${target.name}.`, 'success');
+      renderList();
+      return true;
+    }
+
+    setSwapping(true);
+    setStatus(`Updating ${remote.name}...`);
+    try {
+      const result = await window.api.setGitRemoteUrl(
+        project.path,
+        remote.name,
+        target.url
+      );
+      if (!result.ok) {
+        setStatus(result.errorSummary || `Could not update ${remote.name}.`, 'error');
+        return false;
+      }
+      const index = gitRemotes.findIndex((entry) => entry.name === remote.name);
+      if (index !== -1) gitRemotes[index] = result.remote;
+      project.selectedRemoteName = remote.name;
+      project.selectedRemoteId = null;
+      renderCurrentRemote();
+      renderList();
+      setStatus(
+        result.unchanged
+          ? `${remote.name} already uses ${target.name}.`
+          : `${remote.name} changed from ${result.previousUrl} to ${result.remote.url}.`,
+        'success'
+      );
+      await notifyChange({ refresh: true });
+      return true;
+    } catch (error) {
+      setStatus(error?.message || `Could not update ${remote.name}.`, 'error');
+      return false;
+    } finally {
+      setSwapping(false);
+    }
   };
 
   const renderList = () => {
     list.replaceChildren();
     const sectionTitle = document.createElement('div');
     sectionTitle.className = 'remote-list-title';
-    sectionTitle.textContent = 'Use for this project';
+    sectionTitle.textContent = 'Saved URL targets';
     list.appendChild(sectionTitle);
 
-    const defaultRow = document.createElement('button');
-    defaultRow.type = 'button';
-    defaultRow.className = `remote-manager-row remote-default-row${project.selectedRemoteId ? '' : ' active'}`;
-    defaultRow.setAttribute('aria-pressed', String(!project.selectedRemoteId));
-    const defaultRadio = document.createElement('span');
-    defaultRadio.className = 'remote-radio';
-    const defaultCopy = document.createElement('span');
-    defaultCopy.className = 'remote-row-copy';
-    const defaultName = document.createElement('span');
-    defaultName.className = 'remote-row-name';
-    defaultName.textContent = 'Repository default';
-    const defaultDetail = document.createElement('span');
-    defaultDetail.className = 'remote-row-url';
-    defaultDetail.textContent = 'Use the repository’s existing Git remote and upstream';
-    defaultCopy.append(defaultName, defaultDetail);
-    defaultRow.append(defaultRadio, defaultCopy);
-    defaultRow.addEventListener('click', () => selectRemote(null));
-    list.appendChild(defaultRow);
-
-    for (const remote of project.appRemotes) {
+    const activeUrl = currentRemote()?.url || '';
+    for (const target of project.appRemotes) {
+      const active = !!activeUrl && target.url === activeUrl;
       const row = document.createElement('div');
-      row.className = `remote-manager-row${remote.id === project.selectedRemoteId ? ' active' : ''}`;
+      row.className = `remote-manager-row${active ? ' active' : ''}`;
       const choice = document.createElement('button');
       choice.type = 'button';
       choice.className = 'remote-row-choice';
-      choice.setAttribute('aria-pressed', String(remote.id === project.selectedRemoteId));
-      choice.setAttribute('aria-label', `Use ${remote.name}`);
+      choice.setAttribute('aria-pressed', String(active));
+      choice.setAttribute(
+        'aria-label',
+        active ? `${target.name} is currently used` : `Use ${target.name}`
+      );
       const radio = document.createElement('span');
       radio.className = 'remote-radio';
       const copy = document.createElement('span');
       copy.className = 'remote-row-copy';
-      const remoteName = document.createElement('span');
-      remoteName.className = 'remote-row-name';
-      remoteName.textContent = remote.name;
-      const remoteUrl = document.createElement('span');
-      remoteUrl.className = 'remote-row-url';
-      remoteUrl.textContent = remote.url;
-      remoteUrl.title = remote.url;
-      copy.append(remoteName, remoteUrl);
+      const targetName = document.createElement('span');
+      targetName.className = 'remote-row-name';
+      targetName.textContent = target.name;
+      const targetUrl = document.createElement('span');
+      targetUrl.className = 'remote-row-url';
+      targetUrl.textContent = target.url;
+      targetUrl.title = target.url;
+      copy.append(targetName, targetUrl);
       choice.append(radio, copy);
-      choice.addEventListener('click', () => selectRemote(remote.id));
+      choice.addEventListener('click', () => useTarget(target));
 
       const actions = document.createElement('div');
       actions.className = 'remote-row-actions';
-      const editButton = buttonWithIcon('remote-row-action', 'pencil', `Edit ${remote.name}`);
+      const editButton = buttonWithIcon('remote-row-action', 'pencil', `Edit ${target.name}`);
       editButton.addEventListener('click', () => {
-        editingId = remote.id;
-        nameInput.value = remote.name;
-        urlInput.value = remote.url;
-        formTitle.textContent = `Edit ${remote.name}`;
-        saveButton.textContent = 'Save & select';
+        editingId = target.id;
+        nameInput.value = target.name;
+        urlInput.value = target.url;
+        formTitle.textContent = `Edit ${target.name}`;
+        saveButton.textContent = 'Save & use';
         cancelEditButton.hidden = false;
         setStatus();
         nameInput.focus();
         nameInput.select();
       });
-      const deleteButton = buttonWithIcon('remote-row-action danger', 'trash2', `Delete ${remote.name}`);
+      const deleteButton = buttonWithIcon('remote-row-action danger', 'trash2', `Delete ${target.name}`);
       deleteButton.addEventListener('click', async () => {
         const confirmed = await confirmDialog({
-          message: `Delete “${remote.name}”?`,
-          detail: 'This removes the remote from Git Sync only. Git configuration is not changed.',
+          message: `Delete “${target.name}”?`,
+          detail: 'This removes the saved URL target. It does not change the repository remote.',
           confirmText: 'Delete',
         });
         if (!confirmed) return;
-        project.appRemotes = project.appRemotes.filter((entry) => entry.id !== remote.id);
-        if (project.selectedRemoteId === remote.id) project.selectedRemoteId = null;
-        if (editingId === remote.id) resetForm();
+        project.appRemotes = project.appRemotes.filter((entry) => entry.id !== target.id);
+        if (editingId === target.id) resetForm();
         renderList();
-        await window.api.clearAppRemote(project.path, remote.id);
+        await window.api.clearAppRemote(project.path, target.id);
         await notifyChange();
       });
       actions.append(editButton, deleteButton);
@@ -284,9 +376,37 @@ export function openRemoteManager(project, { onChange } = {}) {
     if (!project.appRemotes.length) {
       const empty = document.createElement('div');
       empty.className = 'remote-manager-empty';
-      empty.textContent = 'No app-managed remotes yet.';
+      empty.textContent = 'No saved URL targets yet.';
       list.appendChild(empty);
     }
+  };
+
+  const renderRemoteOptions = () => {
+    targetSelect.replaceChildren();
+    if (!gitRemotes.length) {
+      const option = document.createElement('option');
+      option.textContent = 'No Git remotes';
+      option.value = '';
+      targetSelect.appendChild(option);
+      targetSelect.disabled = true;
+      selectedRemoteName = '';
+      renderCurrentRemote();
+      renderList();
+      return;
+    }
+
+    for (const remote of gitRemotes) {
+      const option = document.createElement('option');
+      option.value = remote.name;
+      option.textContent = remote.name;
+      targetSelect.appendChild(option);
+    }
+    selectedRemoteName = preferredRemoteName(project, gitRemotes);
+    targetSelect.value = selectedRemoteName;
+    targetSelect.disabled = false;
+    project.selectedRemoteName = selectedRemoteName;
+    renderCurrentRemote();
+    renderList();
   };
 
   const draftRemote = () => {
@@ -300,7 +420,7 @@ export function openRemoteManager(project, { onChange } = {}) {
       && remote.name.toLocaleLowerCase() === validation.remote.name.toLocaleLowerCase()
     ));
     if (duplicate) {
-      setStatus('A remote with this name already exists.', 'error');
+      setStatus('A target with this name already exists.', 'error');
       return null;
     }
     return validation.remote;
@@ -320,10 +440,10 @@ export function openRemoteManager(project, { onChange } = {}) {
     } else {
       project.appRemotes.push({ id, ...draft });
     }
-    project.selectedRemoteId = id;
     resetForm();
     renderList();
     await notifyChange();
+    await useTarget({ id, ...draft });
   });
 
   testButton.addEventListener('click', async () => {
@@ -345,6 +465,14 @@ export function openRemoteManager(project, { onChange } = {}) {
     }
   });
 
+  targetSelect.addEventListener('change', async () => {
+    selectedRemoteName = targetSelect.value;
+    project.selectedRemoteName = selectedRemoteName;
+    renderCurrentRemote();
+    renderList();
+    setStatus();
+    await notifyChange();
+  });
   cancelEditButton.addEventListener('click', resetForm);
   closeButton.addEventListener('click', close);
   doneButton.addEventListener('click', close);
@@ -361,7 +489,27 @@ export function openRemoteManager(project, { onChange } = {}) {
   renderList();
   requestAnimationFrame(() => {
     overlay.classList.add('open');
-    if (!project.appRemotes.length) nameInput.focus();
-    else doneButton.focus();
+    doneButton.focus();
   });
+
+  window.api.getGitRemotes(project.path)
+    .then(async (result) => {
+      if (closed) return;
+      if (!result.ok) {
+        currentUrl.textContent = 'Could not read Git remotes';
+        setStatus(result.errorSummary || 'Could not read repository remotes.', 'error');
+        return;
+      }
+      gitRemotes = result.remotes;
+      renderRemoteOptions();
+      await notifyChange();
+      if (!gitRemotes.length) {
+        setStatus('This repository has no remotes. Add one with Git before using a URL target.', 'error');
+      }
+    })
+    .catch((error) => {
+      if (closed) return;
+      currentUrl.textContent = 'Could not read Git remotes';
+      setStatus(error?.message || 'Could not read repository remotes.', 'error');
+    });
 }

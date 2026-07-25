@@ -22,7 +22,7 @@ import { setupDragAutoScroll } from './js/drag-auto-scroll.js';
 import { hydrateStaticIcons } from './js/icons.js';
 import { basename, withButtonLoading } from './js/util.js';
 import { showToast } from './js/notify.js';
-import { normalizeAppRemotes, selectedAppRemote } from './js/app-remotes.mjs';
+import { normalizeAppRemotes } from './js/app-remotes.mjs';
 import { confirmDialog } from './js/modal.js';
 
 let autoRefreshInitialized = false;
@@ -78,17 +78,13 @@ fetchAllBtn.addEventListener('click', () =>
   withButtonLoading(fetchAllBtn, fetchAllProjects)
 );
 pullSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (path, project) => (
-    window.api.pull(path, selectedAppRemote(project))
-  )))
+  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (path) => window.api.pull(path)))
 );
 pushSelectedBtn.addEventListener('click', () =>
   withButtonLoading(pushSelectedBtn, () => batchOp('Pushing', pushWithUpstreamPrompt))
 );
 fetchSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (path, project) => (
-    window.api.fetch(path, selectedAppRemote(project))
-  )))
+  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (path) => window.api.fetch(path)))
 );
 selectAll.addEventListener('change', () => {
   const checked = selectAll.checked;
@@ -383,9 +379,10 @@ projectSearchInput?.addEventListener('keydown', (event) => {
       behind:   typeof p.behind === 'number' ? p.behind : null,
       uncommitted: typeof p.uncommitted === 'number' ? p.uncommitted : 0,
       appRemotes,
-      selectedRemoteId: appRemotes.some((remote) => remote.id === p.selectedRemoteId)
-        ? p.selectedRemoteId
-        : null,
+      selectedRemoteId: null,
+      selectedRemoteName: typeof p.selectedRemoteName === 'string'
+        ? p.selectedRemoteName.trim()
+        : '',
       error:    null,
     };
   };

@@ -202,6 +202,51 @@ test('app-managed remote operations use one URL without changing Git configurati
   assert.equal(await fs.readFile(configPath, 'utf8'), configBefore);
 });
 
+test('Remote Manager lists repository remotes and swaps the selected remote URL', async (t) => {
+  const root = await makeTempDir(t, 'git-sync-remote-manager-');
+  const firstRemote = path.join(root, 'first.git');
+  const secondRemote = path.join(root, 'second.git');
+  const repo = path.join(root, 'repo');
+  await fs.mkdir(firstRemote);
+  await git(firstRemote, 'init', '--bare');
+  await fs.mkdir(secondRemote);
+  await git(secondRemote, 'init', '--bare');
+  await fs.mkdir(repo);
+  await initRepo(repo);
+  await git(repo, 'remote', 'add', 'origin', firstRemote);
+  await git(repo, 'remote', 'set-url', '--push', '--add', 'origin', firstRemote);
+
+  const listed = await handlers.get('get-git-remotes')(null, repo);
+  assert.equal(listed.ok, true);
+  assert.deepEqual(listed.remotes, [{
+    name: 'origin',
+    url: firstRemote,
+    pushUrl: firstRemote,
+    hasExplicitPushUrl: true,
+  }]);
+
+  const swapped = await handlers.get('set-git-remote-url')(
+    null,
+    repo,
+    'origin',
+    secondRemote
+  );
+  assert.equal(swapped.ok, true, swapped.errorSummary);
+  assert.equal(swapped.previousUrl, firstRemote);
+  assert.equal(swapped.remote.url, secondRemote);
+  assert.equal((await git(repo, 'remote', 'get-url', 'origin')).stdout.trim(), secondRemote);
+  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'origin')).stdout.trim(), secondRemote);
+
+  const missing = await handlers.get('set-git-remote-url')(
+    null,
+    repo,
+    'upstream',
+    firstRemote
+  );
+  assert.equal(missing.ok, false);
+  assert.equal(missing.errorCode, 'GIT_REMOTE_NOT_FOUND');
+});
+
 test('Cross Sync compares and integrates related local repositories', async (t) => {
   const root = await makeTempDir(t, 'git-sync-cross-');
   const base = path.join(root, 'base');

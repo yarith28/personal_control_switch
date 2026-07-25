@@ -13,8 +13,8 @@ function serializeProject(p) {
   if (typeof p.uncommitted === 'number') out.uncommitted = p.uncommitted;
   const appRemotes = normalizeAppRemotes(p.appRemotes);
   if (appRemotes.length) out.appRemotes = appRemotes;
-  if (appRemotes.some((remote) => remote.id === p.selectedRemoteId)) {
-    out.selectedRemoteId = p.selectedRemoteId;
+  if (typeof p.selectedRemoteName === 'string' && p.selectedRemoteName.trim()) {
+    out.selectedRemoteName = p.selectedRemoteName.trim();
   }
   return out;
 }

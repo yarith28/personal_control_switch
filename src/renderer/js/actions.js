@@ -8,7 +8,6 @@ import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
 import { setRowBusy, setRowCancellable, setRowStatus } from './render-row.js';
 import { confirmDialog, promptDialog } from './modal.js';
-import { selectedAppRemote } from './app-remotes.mjs';
 
 const LONG_RUNNING_WARNING_MS = 8000;
 let pushSetupPromptQueue = Promise.resolve();
@@ -84,9 +83,7 @@ function confirmPushSetup(projectName) {
 }
 
 export async function pushWithUpstreamPrompt(repoPath, project = null) {
-  const appRemote = selectedAppRemote(project);
-  const result = await window.api.push(repoPath, appRemote);
-  if (appRemote) return result;
+  const result = await window.api.push(repoPath);
   if (result?.ok || result?.errorCode !== 'NO_UPSTREAM') return result;
 
   const projectName = basename(repoPath);
@@ -204,7 +201,7 @@ export async function doPull(project) {
     startLabel: 'Pulling',
     successLabel: 'pull complete',
     failureLabel: 'pull failed',
-    action: (repoPath, target) => window.api.pull(repoPath, selectedAppRemote(target)),
+    action: (repoPath) => window.api.pull(repoPath),
     warnLongRunning: true,
     notifyOnFailure: true,
     cancellable: true,
@@ -230,7 +227,7 @@ export async function doFetch(project) {
     startLabel: 'Fetching',
     successLabel: 'fetch complete',
     failureLabel: 'fetch failed',
-    action: (repoPath, target) => window.api.fetch(repoPath, selectedAppRemote(target)),
+    action: (repoPath) => window.api.fetch(repoPath),
     warnLongRunning: true,
     cancellable: true,
   });
@@ -418,23 +415,17 @@ async function runBatchOp(opName, targets, opFn) {
 
 export async function fetchAllProjects() {
   const targets = getProjects().filter((p) => p.branches);
-  await runBatchOp('Fetching', targets, (repoPath, project) => (
-    window.api.fetch(repoPath, selectedAppRemote(project))
-  ));
+  await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
 }
 
 export async function fetchFolderProjects(folder) {
   const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Fetching', targets, (repoPath, project) => (
-    window.api.fetch(repoPath, selectedAppRemote(project))
-  ));
+  await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
 }
 
 export async function pullFolderProjects(folder) {
   const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Pulling', targets, (repoPath, project) => (
-    window.api.pull(repoPath, selectedAppRemote(project))
-  ));
+  await runBatchOp('Pulling', targets, (repoPath) => window.api.pull(repoPath));
 }
 
 export async function pushFolderProjects(folder) {

@@ -94,6 +94,56 @@ function appRemoteRef(remoteId, branch = '') {
   return `refs/git-sync/remotes/${remoteId}${branch ? `/${branch}` : ''}`;
 }
 
+function validateGitRemoteName(value) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (!name || name.length > 255 || /[\u0000-\u001f\u007f]/.test(name)) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_GIT_REMOTE',
+      errorSummary: 'The selected Git remote is invalid.',
+      errorRaw: '',
+    };
+  }
+  return { ok: true, name };
+}
+
+function validateRemoteUrl(value) {
+  const url = typeof value === 'string' ? value.trim() : '';
+  if (!url || url.length > 4096 || /[\u0000-\u001f\u007f]/.test(url)) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_REMOTE_URL',
+      errorSummary: 'Enter a valid remote URL or local repository path.',
+      errorRaw: '',
+    };
+  }
+  return { ok: true, url };
+}
+
+async function listGitRemotes(repoPath) {
+  const namesResult = await runGit(['remote'], repoPath);
+  if (!namesResult.ok) return namesResult;
+
+  const names = namesResult.stdout
+    .split(/\r?\n/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const remotes = await Promise.all(names.map(async (name) => {
+    const [fetchResult, pushResult, explicitPushResult] = await Promise.all([
+      runGit(['remote', 'get-url', name], repoPath),
+      runGit(['remote', 'get-url', '--push', name], repoPath),
+      runGit(['config', '--get-all', `remote.${name}.pushurl`], repoPath),
+    ]);
+    return {
+      name,
+      url: fetchResult.ok ? fetchResult.stdout.trim() : '',
+      pushUrl: pushResult.ok ? pushResult.stdout.trim() : '',
+      hasExplicitPushUrl: explicitPushResult.ok,
+    };
+  }));
+  return { ok: true, remotes };
+}
+
 function sendGitProgress(event, repoPath, payload) {
   event?.sender?.send('git-progress', { repoPath, ...payload });
 }
@@ -413,6 +463,90 @@ ipcMain.handle('fetch', async (event, repoPath, appRemoteValue = null) => {
   return await runGitStreaming(['fetch', '--prune'], repoPath, (payload) => {
     sendGitProgress(event, repoPath, payload);
   });
+});
+
+ipcMain.handle('get-git-remotes', async (_, repoPath) => {
+  return await listGitRemotes(repoPath);
+});
+
+ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlValue) => {
+  const remoteName = validateGitRemoteName(remoteNameValue);
+  if (!remoteName.ok) return remoteName;
+  const remoteUrl = validateRemoteUrl(urlValue);
+  if (!remoteUrl.ok) return remoteUrl;
+
+  const remotesResult = await listGitRemotes(repoPath);
+  if (!remotesResult.ok) return remotesResult;
+  const existing = remotesResult.remotes.find((remote) => remote.name === remoteName.name);
+  if (!existing) {
+    return {
+      ok: false,
+      errorCode: 'GIT_REMOTE_NOT_FOUND',
+      errorSummary: `Remote ${remoteName.name} no longer exists.`,
+      errorRaw: '',
+    };
+  }
+  if (existing.url === remoteUrl.url) {
+    return { ok: true, unchanged: true, remote: existing };
+  }
+
+  const updateMatchingPushUrl = (
+    existing.hasExplicitPushUrl
+    && existing.pushUrl === existing.url
+  );
+  const updated = await runGit(
+    ['remote', 'set-url', remoteName.name, remoteUrl.url],
+    repoPath
+  );
+  if (!updated.ok) {
+    updated.errorSummary = `Could not update ${remoteName.name}.`;
+    return updated;
+  }
+  if (updateMatchingPushUrl) {
+    const pushUpdated = await runGit(
+      ['remote', 'set-url', '--push', remoteName.name, remoteUrl.url],
+      repoPath
+    );
+    if (!pushUpdated.ok) {
+      await runGit(['remote', 'set-url', remoteName.name, existing.url], repoPath);
+      pushUpdated.errorSummary = `Could not update the push URL for ${remoteName.name}. The previous URL was restored.`;
+      return pushUpdated;
+    }
+  }
+
+  const refreshed = await listGitRemotes(repoPath);
+  const remote = refreshed.ok
+    ? refreshed.remotes.find((entry) => entry.name === remoteName.name)
+    : null;
+  const verified = (
+    remote?.url === remoteUrl.url
+    && (!updateMatchingPushUrl || remote.pushUrl === remoteUrl.url)
+  );
+  if (!verified) {
+    const rollbackResults = await Promise.all([
+      runGit(['remote', 'set-url', remoteName.name, existing.url], repoPath),
+      ...(updateMatchingPushUrl
+        ? [runGit(['remote', 'set-url', '--push', remoteName.name, existing.pushUrl], repoPath)]
+        : []),
+    ]);
+    const rollbackOk = rollbackResults.every((result) => result.ok);
+    return {
+      ok: false,
+      errorCode: 'REMOTE_URL_VERIFY_FAILED',
+      errorSummary: rollbackOk
+        ? `Git did not retain the new URL for ${remoteName.name}. The previous URL was restored.`
+        : `Git did not retain the new URL for ${remoteName.name}, and the previous URL could not be restored.`,
+      errorRaw: refreshed.errorRaw
+        || rollbackResults.find((result) => !result.ok)?.errorRaw
+        || '',
+    };
+  }
+
+  return {
+    ok: true,
+    remote,
+    previousUrl: existing.url,
+  };
 });
 
 ipcMain.handle('git-status', async (_, repoPath) => {

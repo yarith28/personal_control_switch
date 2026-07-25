@@ -2636,7 +2636,7 @@ body.helper-open .projects { overflow: hidden; }
 .name-branch.no-upstream.clickable:hover { background: rgba(220, 76, 76, 0.2); }
 .name-branch.busy { cursor: wait; opacity: 0.6; }
 
-/* App-managed remote chip next to the branch chip. */
+/* Repository remote chip next to the branch chip. */
 .name-remote {
   display: inline-block;
   flex-shrink: 0;
@@ -2701,6 +2701,57 @@ body.helper-open .projects { overflow: hidden; }
   font-size: 11px;
   line-height: 1.45;
 }
+.remote-target-panel {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(130px, 0.35fr) minmax(260px, 1fr);
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass-bg);
+}
+.remote-target-field,
+.remote-current {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.remote-target-field > span,
+.remote-current-caption {
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+.remote-target-field select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--dropdown-bg);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+.remote-target-field select:focus {
+  border-color: var(--remote-color);
+  box-shadow: 0 0 0 3px var(--remote-bg);
+}
+.remote-current-url,
+.remote-push-url-note {
+  overflow: hidden;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-current-url { color: var(--text-primary); }
+.remote-push-url-note { color: #b45309; }
 .remote-manager-close,
 .remote-row-action {
   width: 28px;
@@ -2873,6 +2924,7 @@ button.remote-manager-row {
 .remote-manager-footer { flex-shrink: 0; }
 
 @media (max-width: 600px) {
+  .remote-target-panel,
   .remote-form-fields { grid-template-columns: 1fr; }
   .remote-manager-list { max-height: 220px; }
 }
