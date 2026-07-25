@@ -11,6 +11,7 @@ import {
 import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { confirmDialog } from './modal.js';
 import { positionDropdown, withButtonLoading } from './util.js';
+import { startDragAutoScroll, stopDragAutoScroll } from './drag-auto-scroll.js';
 
 export async function addFolder() {
   const id = 'f' + Date.now();
@@ -180,6 +181,11 @@ export function renderFolderHeader(folder) {
   };
 
   createFolderAction({
+    action: 'Fetch',
+    iconName: 'arrowDownUp',
+    run: () => fetchFolderProjects(folder),
+  });
+  createFolderAction({
     action: 'Pull',
     iconName: 'arrowDown',
     run: () => pullFolderProjects(folder),
@@ -190,11 +196,6 @@ export function renderFolderHeader(folder) {
     iconName: 'arrowUp',
     run: () => pushFolderProjects(folder),
     confirmation: `This runs Git push in ${actionableCount} project${actionableCount === 1 ? '' : 's'} and updates their configured remotes.`,
-  });
-  createFolderAction({
-    action: 'Fetch',
-    iconName: 'arrowDownUp',
-    run: () => fetchFolderProjects(folder),
   });
 
   // color marker (edit mode only)
@@ -325,9 +326,11 @@ export function renderFolderHeader(folder) {
     }
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', 'FOLDER:' + folder.id);
+    startDragAutoScroll();
     setTimeout(() => el.classList.add('dragging'), 0);
   });
   el.addEventListener('dragend', () => {
+    stopDragAutoScroll();
     el.draggable = state.organizeMode;
     el.classList.remove('dragging');
     document.querySelectorAll('.project-row, .group-header').forEach((r) => r.classList.remove('drag-over'));
@@ -345,6 +348,7 @@ export function renderFolderHeader(folder) {
   el.addEventListener('drop', async (e) => {
     if (!state.organizeMode) return;
     e.preventDefault();
+    stopDragAutoScroll();
     el.classList.remove('drag-over');
     const data = e.dataTransfer.getData('text/plain');
 

@@ -6,7 +6,7 @@ export const state = {
   currentTheme: null,
   currentFont: null,
   compactMode: false,
-  burstMode: false,
+  burstMode: true,
   helperSeen: false,
   homedir: null,
   searchQuery: '',

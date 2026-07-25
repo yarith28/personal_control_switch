@@ -2,12 +2,15 @@ import { getProjects } from './state.js';
 import { renderProjects } from './render-list.js';
 import { persist } from './persist.js';
 import { log } from './log.js';
+import { selectedAppRemote } from './app-remotes.mjs';
 
 export async function refreshBranches(project) {
-  const res = await window.api.getBranches(project.path);
+  const res = await window.api.getBranches(project.path, selectedAppRemote(project));
   if (res.ok) {
     project.branches    = res.branches;
     project.current     = res.current;
+    project.hasUpstream = res.hasUpstream;
+    project.upstream    = res.upstream || null;
     project.ahead       = res.ahead;
     project.behind      = res.behind;
     project.uncommitted = res.uncommitted ?? 0;
@@ -16,6 +19,8 @@ export async function refreshBranches(project) {
   } else {
     project.branches = null;
     project.current = null;
+    project.hasUpstream = null;
+    project.upstream = null;
     project.uncommitted = 0;
     project.error = res.error;
     project.missing = !!res.missing;

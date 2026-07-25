@@ -92,6 +92,8 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal((await handlers.get('fetch')(progressEvent, second)).ok, true);
   const branches = await handlers.get('get-branches')(null, second);
   assert.equal(branches.ok, true);
+  assert.equal(branches.hasUpstream, true);
+  assert.equal(branches.upstream, 'origin/main');
   assert.equal(branches.behind, 1);
   assert.equal((await handlers.get('pull')(progressEvent, second)).ok, true);
   assert.equal(await fs.readFile(path.join(second, 'shared.txt'), 'utf8'), 'two\n');
@@ -108,6 +110,10 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal((await git(second, 'branch', '--show-current')).stdout.trim(), 'feature/new-control');
   assert.equal((await handlers.get('create-branch')(null, second, 'invalid branch name')).ok, false);
 
+  const localOnly = await handlers.get('get-branches')(null, second);
+  assert.equal(localOnly.hasUpstream, false);
+  assert.equal(localOnly.upstream, null);
+
   const noUpstream = await handlers.get('push')(progressEvent, second);
   assert.equal(noUpstream.ok, false);
   assert.equal(noUpstream.errorCode, 'NO_UPSTREAM');
@@ -119,6 +125,9 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
     (await git(second, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')).stdout.trim(),
     'origin/feature/new-control'
   );
+  const trackedBranch = await handlers.get('get-branches')(null, second);
+  assert.equal(trackedBranch.hasUpstream, true);
+  assert.equal(trackedBranch.upstream, 'origin/feature/new-control');
 
   const projectIdentity = await handlers.get('identity-get')(
     null,
@@ -141,6 +150,56 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal(clearedIdentity.ok, true, clearedIdentity.error);
   assert.equal(clearedIdentity.hasNameOverride, false);
   assert.equal(clearedIdentity.hasEmailOverride, false);
+});
+
+test('app-managed remote operations use one URL without changing Git configuration', async (t) => {
+  const root = await makeTempDir(t, 'git-sync-app-remote-');
+  const remote = path.join(root, 'remote.git');
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'target');
+  await fs.mkdir(remote);
+  await git(remote, 'init', '--bare');
+  await fs.mkdir(source);
+  await initRepo(source);
+  await commitFile(source, 'shared.txt', 'one\n', 'initial');
+  await git(source, 'push', remote, 'main:main');
+
+  await fs.mkdir(target);
+  await initRepo(target);
+  await git(target, 'fetch', remote, 'main');
+  await git(target, 'reset', '--hard', 'FETCH_HEAD');
+  const configPath = path.join(target, '.git', 'config');
+  const configBefore = await fs.readFile(configPath, 'utf8');
+  const appRemote = { id: 'team_remote', name: 'team', url: remote };
+
+  assert.equal((await handlers.get('test-app-remote')(null, target, appRemote)).ok, true);
+  await commitFile(source, 'shared.txt', 'two\n', 'source update');
+  await git(source, 'push', remote, 'main:main');
+
+  const fetched = await handlers.get('fetch')(progressEvent, target, appRemote);
+  assert.equal(fetched.ok, true, fetched.errorSummary);
+  const status = await handlers.get('get-branches')(null, target, appRemote);
+  assert.equal(status.ok, true);
+  assert.equal(status.hasRemoteBranch, true);
+  assert.equal(status.ahead, 0);
+  assert.equal(status.behind, 1);
+
+  const pulled = await handlers.get('pull')(progressEvent, target, appRemote);
+  assert.equal(pulled.ok, true, pulled.errorSummary);
+  assert.equal(await fs.readFile(path.join(target, 'shared.txt'), 'utf8'), 'two\n');
+
+  await commitFile(target, 'target.txt', 'target\n', 'target update');
+  const pushed = await handlers.get('push')(progressEvent, target, appRemote);
+  assert.equal(pushed.ok, true, pushed.errorSummary);
+  assert.equal(
+    (await git(target, 'rev-parse', 'HEAD')).stdout.trim(),
+    (await git(remote, 'rev-parse', 'refs/heads/main')).stdout.trim()
+  );
+
+  assert.equal(await fs.readFile(configPath, 'utf8'), configBefore);
+  assert.equal((await handlers.get('clear-app-remote')(null, target, appRemote.id)).ok, true);
+  await assert.rejects(git(target, 'rev-parse', '--verify', 'refs/git-sync/remotes/team_remote/main'));
+  assert.equal(await fs.readFile(configPath, 'utf8'), configBefore);
 });
 
 test('Cross Sync compares and integrates related local repositories', async (t) => {

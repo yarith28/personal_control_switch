@@ -6,6 +6,7 @@ const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const { createGitService, combinedGitOutput } = require('./git-process');
 const { createConfigStore } = require('./config-store');
+const { createConfigLocationStore } = require('./config-location');
 
 function installApplicationMenu() {
   if (process.platform !== 'darwin') {
@@ -38,9 +39,94 @@ const {
   runGitStreaming,
   cancelRepoOperations,
 } = createGitService();
-const configStore = createConfigStore({
-  getConfigPath: () => path.join(app.getPath('userData'), 'config.json'),
+const userDataPath = app.getPath('userData');
+const homePath = app.getPath('home');
+const configEnvironmentVariable = 'GIT_SYNC_CONFIG_PATH';
+const rawEnvironmentConfigPath = String(process.env[configEnvironmentVariable] || '').trim();
+const environmentConfigPath = rawEnvironmentConfigPath.startsWith('~/')
+  ? path.join(homePath, rawEnvironmentConfigPath.slice(2))
+  : rawEnvironmentConfigPath;
+const legacyDefaultConfigPath = path.join(userDataPath, 'config.json');
+const configLocationStore = createConfigLocationStore({
+  defaultConfigPath: path.join(homePath, 'git_sync_config.json'),
+  pointerPath: path.join(userDataPath, 'config-location.json'),
+  overrideConfigPath: environmentConfigPath,
+  overrideLabel: configEnvironmentVariable,
 });
+let configLocationReady = null;
+const ensureConfigLocation = async () => {
+  configLocationReady ||= (async () => {
+    await configLocationStore.initialize();
+    await configLocationStore.migrateDefaultFrom(legacyDefaultConfigPath);
+  })();
+  await configLocationReady;
+  return await configLocationStore.initialize();
+};
+const configStore = createConfigStore({ getConfigPath: configLocationStore.getPath });
+
+const APP_REMOTE_ID_PATTERN = /^[a-z0-9_-]{1,80}$/i;
+
+function resolveAppRemote(value) {
+  if (value == null) return { ok: true, remote: null };
+  const id = typeof value?.id === 'string' ? value.id.trim() : '';
+  const name = typeof value?.name === 'string' ? value.name.trim() : '';
+  const url = typeof value?.url === 'string' ? value.url.trim() : '';
+  if (
+    !APP_REMOTE_ID_PATTERN.test(id)
+    || !name
+    || name.length > 64
+    || !url
+    || url.length > 4096
+    || /[\u0000-\u001f\u007f]/.test(name)
+    || /[\u0000-\u001f\u007f]/.test(url)
+  ) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_APP_REMOTE',
+      errorSummary: 'The selected app remote is invalid.',
+      errorRaw: '',
+    };
+  }
+  return { ok: true, remote: { id, name, url } };
+}
+
+function appRemoteRef(remoteId, branch = '') {
+  return `refs/git-sync/remotes/${remoteId}${branch ? `/${branch}` : ''}`;
+}
+
+function sendGitProgress(event, repoPath, payload) {
+  event?.sender?.send('git-progress', { repoPath, ...payload });
+}
+
+async function currentBranch(repoPath) {
+  const result = await runGit(['branch', '--show-current'], repoPath);
+  if (!result.ok) return result;
+  const branch = result.stdout.trim();
+  if (!branch) {
+    return {
+      ok: false,
+      errorCode: 'DETACHED_HEAD',
+      errorSummary: 'Check out a local branch before using an app remote.',
+      errorRaw: '',
+    };
+  }
+  return { ok: true, branch };
+}
+
+function fetchAppRemote(event, repoPath, remote) {
+  return runGitStreaming(
+    [
+      'fetch',
+      '--prune',
+      '--no-tags',
+      '--',
+      remote.url,
+      `+refs/heads/*:${appRemoteRef(remote.id)}/*`,
+    ],
+    repoPath,
+    (payload) => sendGitProgress(event, repoPath, payload)
+  );
+}
 
 function debounce(fn, ms) {
   let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -206,17 +292,50 @@ async function openProjectTarget(repoPath, target) {
   }
 }
 
-function loadConfig(options) {
+async function loadConfig(options) {
+  await ensureConfigLocation();
   return configStore.load(options);
 }
 
-function updateConfig(mutator) {
+async function updateConfig(mutator) {
+  await ensureConfigLocation();
   return configStore.update(mutator);
 }
 
 ipcMain.handle('load-config', () => loadConfig({ reportRecovery: true }));
 ipcMain.handle('save-config', (_, config) => {
   return updateConfig((cfg) => { Object.assign(cfg, config); });
+});
+
+ipcMain.handle('get-config-location', async () => {
+  return await ensureConfigLocation();
+});
+
+ipcMain.handle('pick-config-file', async (event) => {
+  await ensureConfigLocation();
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choose Git Sync configuration',
+    defaultPath: path.dirname(configLocationStore.getPath()),
+    properties: ['openFile'],
+    filters: [
+      { name: 'JSON configuration', extensions: ['json'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return result.canceled ? null : result.filePaths[0] || null;
+});
+
+ipcMain.handle('set-config-location', async (_, configPath) => {
+  await ensureConfigLocation();
+  await updateConfig(() => {});
+  return await configLocationStore.setPath(configPath);
+});
+
+ipcMain.handle('reset-config-location', async () => {
+  await ensureConfigLocation();
+  await updateConfig(() => {});
+  return await configLocationStore.reset();
 });
 
 ipcMain.handle('pick-folder', async () => {
@@ -227,7 +346,7 @@ ipcMain.handle('pick-folder', async () => {
   return result.filePaths;
 });
 
-ipcMain.handle('get-branches', async (_, repoPath) => {
+ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   // Distinguish a deleted/missing folder from a folder that simply isn't a repo,
   // so the UI can grey out and offer to remove projects whose path is gone.
   try {
@@ -247,8 +366,26 @@ ipcMain.handle('get-branches', async (_, repoPath) => {
   if (!branches.ok) return { ok: false, error: branches.stderr };
 
   const current = await runGit(['branch', '--show-current'], repoPath);
-  const ahead   = await runGit(['rev-list', '--count', '@{u}..HEAD'], repoPath);
-  const behind  = await runGit(['rev-list', '--count', 'HEAD..@{u}'], repoPath);
+  const upstream = await runGit(
+    ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+    repoPath
+  );
+  const appRemoteResult = resolveAppRemote(appRemoteValue);
+  if (!appRemoteResult.ok) return appRemoteResult;
+  const appRemote = appRemoteResult.remote;
+  const currentName = current.stdout.trim();
+  const comparisonRef = appRemote && currentName
+    ? appRemoteRef(appRemote.id, currentName)
+    : '@{u}';
+  const comparisonExists = appRemote
+    ? await runGit(['rev-parse', '--verify', comparisonRef], repoPath)
+    : upstream;
+  const ahead = comparisonExists.ok
+    ? await runGit(['rev-list', '--count', `${comparisonRef}..HEAD`], repoPath)
+    : null;
+  const behind = comparisonExists.ok
+    ? await runGit(['rev-list', '--count', `HEAD..${comparisonRef}`], repoPath)
+    : null;
   const status  = await runGit(['status', '--porcelain'], repoPath);
   const uncommitted = status.ok
     ? status.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length
@@ -257,16 +394,24 @@ ipcMain.handle('get-branches', async (_, repoPath) => {
   return {
     ok: true,
     branches: branches.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
-    current:  current.stdout.trim(),
-    ahead:    ahead.ok  ? (parseInt(ahead.stdout.trim())  || 0) : null,
-    behind:   behind.ok ? (parseInt(behind.stdout.trim()) || 0) : null,
+    current:  currentName,
+    hasUpstream: upstream.ok,
+    upstream: upstream.ok ? upstream.stdout.trim() : null,
+    hasRemoteBranch: appRemote ? comparisonExists.ok : null,
+    ahead:    ahead?.ok  ? (parseInt(ahead.stdout.trim())  || 0) : null,
+    behind:   behind?.ok ? (parseInt(behind.stdout.trim()) || 0) : null,
     uncommitted,
   };
 });
 
-ipcMain.handle('fetch', async (event, repoPath) => {
+ipcMain.handle('fetch', async (event, repoPath, appRemoteValue = null) => {
+  const appRemoteResult = resolveAppRemote(appRemoteValue);
+  if (!appRemoteResult.ok) return appRemoteResult;
+  if (appRemoteResult.remote) {
+    return await fetchAppRemote(event, repoPath, appRemoteResult.remote);
+  }
   return await runGitStreaming(['fetch', '--prune'], repoPath, (payload) => {
-    event.sender.send('git-progress', { repoPath, ...payload });
+    sendGitProgress(event, repoPath, payload);
   });
 });
 
@@ -358,16 +503,82 @@ ipcMain.handle('create-branch', async (_, repoPath, branch) => {
   return created;
 });
 
-ipcMain.handle('pull', async (event, repoPath) => {
+ipcMain.handle('pull', async (event, repoPath, appRemoteValue = null) => {
+  const appRemoteResult = resolveAppRemote(appRemoteValue);
+  if (!appRemoteResult.ok) return appRemoteResult;
+  if (appRemoteResult.remote) {
+    const branchResult = await currentBranch(repoPath);
+    if (!branchResult.ok) return branchResult;
+    const fetched = await fetchAppRemote(event, repoPath, appRemoteResult.remote);
+    if (!fetched.ok) return fetched;
+
+    const remoteRef = appRemoteRef(appRemoteResult.remote.id, branchResult.branch);
+    const exists = await runGit(['rev-parse', '--verify', remoteRef], repoPath);
+    if (!exists.ok) {
+      return {
+        ok: false,
+        errorCode: 'REMOTE_BRANCH_MISSING',
+        errorSummary: `Remote ${appRemoteResult.remote.name} has no ${branchResult.branch} branch.`,
+        errorRaw: exists.errorRaw,
+      };
+    }
+
+    const merged = await runGitStreaming(['merge', '--ff-only', remoteRef], repoPath, (payload) => {
+      sendGitProgress(event, repoPath, payload);
+    });
+    if (!merged.ok && /fast-forward|diverg/i.test(merged.errorRaw || '')) {
+      merged.errorSummary = 'Fast-forward pull is not possible because the local and remote branches have diverged.';
+      merged.errorCode = 'FF_ONLY_REQUIRED';
+    }
+    return merged;
+  }
   return await runGitStreaming(['pull'], repoPath, (payload) => {
-    event.sender.send('git-progress', { repoPath, ...payload });
+    sendGitProgress(event, repoPath, payload);
   });
 });
 
-ipcMain.handle('push', async (event, repoPath) => {
+ipcMain.handle('push', async (event, repoPath, appRemoteValue = null) => {
+  const appRemoteResult = resolveAppRemote(appRemoteValue);
+  if (!appRemoteResult.ok) return appRemoteResult;
+  if (appRemoteResult.remote) {
+    const branchResult = await currentBranch(repoPath);
+    if (!branchResult.ok) return branchResult;
+    const branchRef = `refs/heads/${branchResult.branch}`;
+    const result = await runGitStreaming(
+      ['push', '--', appRemoteResult.remote.url, `${branchRef}:${branchRef}`],
+      repoPath,
+      (payload) => sendGitProgress(event, repoPath, payload)
+    );
+    if (result.ok) {
+      await runGit(['update-ref', appRemoteRef(appRemoteResult.remote.id, branchResult.branch), 'HEAD'], repoPath);
+    }
+    return result;
+  }
   return await runGitStreaming(['push'], repoPath, (payload) => {
-    event.sender.send('git-progress', { repoPath, ...payload });
+    sendGitProgress(event, repoPath, payload);
   });
+});
+
+ipcMain.handle('test-app-remote', async (_, repoPath, appRemoteValue) => {
+  const appRemoteResult = resolveAppRemote(appRemoteValue);
+  if (!appRemoteResult.ok || !appRemoteResult.remote) return appRemoteResult;
+  const result = await runGit(['ls-remote', '--heads', '--', appRemoteResult.remote.url], repoPath);
+  if (!result.ok) result.errorSummary = `Could not connect to ${appRemoteResult.remote.name}.`;
+  return result;
+});
+
+ipcMain.handle('clear-app-remote', async (_, repoPath, remoteId) => {
+  if (!APP_REMOTE_ID_PATTERN.test(String(remoteId || ''))) {
+    return { ok: false, errorSummary: 'The app remote ID is invalid.', errorRaw: '' };
+  }
+  const prefix = `${appRemoteRef(remoteId)}/`;
+  const refs = await runGit(['for-each-ref', '--format=%(refname)', prefix], repoPath);
+  if (!refs.ok) return refs;
+  for (const ref of refs.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
+    const removed = await runGit(['update-ref', '-d', ref], repoPath);
+    if (!removed.ok) return removed;
+  }
+  return { ok: true, removed: refs.stdout.split(/\r?\n/).filter(Boolean).length };
 });
 
 async function resolvePushSetupTarget(repoPath) {

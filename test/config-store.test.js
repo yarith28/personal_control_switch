@@ -12,6 +12,17 @@ async function withTempDir(t) {
   return dir;
 }
 
+test('burst mode defaults on while preserving an explicit opt-out', async (t) => {
+  const dir = await withTempDir(t);
+  const configPath = path.join(dir, 'config.json');
+  const store = createConfigStore({ getConfigPath: () => configPath });
+
+  assert.equal((await store.load()).burst, true);
+
+  await fs.writeFile(configPath, JSON.stringify({ projects: [], burst: false }), 'utf8');
+  assert.equal((await store.load()).burst, false);
+});
+
 test('configuration updates are atomic and retain the previous valid version', async (t) => {
   const dir = await withTempDir(t);
   const configPath = path.join(dir, 'config.json');

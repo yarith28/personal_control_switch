@@ -100,6 +100,8 @@
   --surface: rgba(255, 255, 255, 0.5);
   --branch-bg: rgba(168, 85, 247, 0.12);
   --branch-color: #7c3aed;
+  --remote-bg: rgba(13, 148, 136, 0.12);
+  --remote-color: #0f766e;
   --output-bg: rgba(20, 16, 56, 0.78);
   --output-text: #f3e8ff;
   --output-placeholder: #a78bfa;
@@ -1919,12 +1921,15 @@ input[type='checkbox']:disabled + .checkbox-box {
   min-width: 0;
 }
 .project-row .name-inner {
+  display: flex;
+  align-items: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
   flex-shrink: 1;
 }
+.project-row .name-inner .name-text { flex: 0 1 auto; }
 .project-row .path {
   font-size: 10px;
   color: var(--text-faint);
@@ -2310,7 +2315,7 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 0.18s ease, transform 0.18s ease;
-  min-width: 220px;
+  min-width: 280px;
 }
 .settings-panel.open { pointer-events: all; opacity: 1; transform: translateY(0); }
 
@@ -2498,6 +2503,56 @@ body.helper-open .projects { overflow: hidden; }
   letter-spacing: 0.04em;
 }
 
+.settings-config-row {
+  padding-top: 9px;
+  border-top: 1px solid var(--glass-border);
+}
+.settings-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-config-actions { display: flex; align-items: center; gap: 6px; }
+.config-file-btn {
+  padding: 4px 9px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.config-file-btn:hover {
+  border-color: var(--branch-color);
+  background: var(--branch-bg);
+  color: var(--branch-color);
+}
+.config-file-btn:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.config-file-btn:disabled:hover {
+  border-color: var(--glass-border);
+  background: transparent;
+  color: var(--text-muted);
+}
+.config-file-btn[hidden] { display: none; }
+.settings-config-path {
+  max-width: 250px;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .theme-swatches {
   display: flex;
   align-items: center;
@@ -2574,7 +2629,253 @@ body.helper-open .projects { overflow: hidden; }
 .name-branch:empty { display: none; }
 .name-branch.clickable { cursor: pointer; }
 .name-branch.clickable:hover { background: rgba(168, 85, 247, 0.22); }
+.name-branch.no-upstream {
+  color: #dc4c4c;
+  background: rgba(220, 76, 76, 0.12);
+}
+.name-branch.no-upstream.clickable:hover { background: rgba(220, 76, 76, 0.2); }
 .name-branch.busy { cursor: wait; opacity: 0.6; }
+
+/* App-managed remote chip next to the branch chip. */
+.name-remote {
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--remote-bg);
+  color: var(--remote-color);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.14s ease, opacity 0.14s ease;
+  -webkit-app-region: no-drag;
+}
+.name-remote:hover { background: color-mix(in srgb, var(--remote-color) 21%, transparent); }
+.name-remote.unset {
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--text-faint) 10%, transparent);
+}
+.name-remote.unset:hover {
+  color: var(--remote-color);
+  background: var(--remote-bg);
+}
+.name-remote[hidden] { display: none; }
+.organize-mode .name-remote,
+.multi-select .name-remote { pointer-events: none; opacity: 0.55; }
+
+/* Remote manager follows the same glass modal language as the app dialogs. */
+.remote-manager-overlay { z-index: 9000; }
+.remote-manager-card {
+  width: min(620px, calc(100vw - 36px));
+  max-width: 620px;
+  max-height: min(720px, calc(100vh - 36px));
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+.remote-manager-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.remote-manager-eyebrow {
+  margin-bottom: 3px;
+  color: var(--remote-color);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.remote-manager-header .modal-message { margin-bottom: 4px; }
+.remote-manager-intro {
+  max-width: 480px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.remote-manager-close,
+.remote-row-action {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  background: var(--glass-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.remote-manager-close:hover,
+.remote-row-action:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
+.remote-manager-list {
+  flex: 1 1 140px;
+  min-height: 0;
+  max-height: 270px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 3px;
+}
+.remote-list-title,
+.remote-form-title {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.remote-manager-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+button.remote-manager-row {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.remote-manager-row:hover { background: var(--glass-bg-hover); }
+.remote-manager-row.active {
+  border-color: color-mix(in srgb, var(--remote-color) 44%, var(--glass-border));
+  background: var(--remote-bg);
+}
+.remote-row-choice {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.remote-default-row { gap: 10px; padding: 9px 11px; }
+.remote-radio {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 3px transparent;
+}
+.remote-manager-row.active .remote-radio {
+  border-color: var(--remote-color);
+  background: var(--remote-color);
+  box-shadow: inset 0 0 0 3px var(--dropdown-bg);
+}
+.remote-row-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.remote-row-name { font-size: 12px; font-weight: 700; }
+.remote-row-url {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.remote-row-action { width: 26px; height: 26px; border-color: transparent; background: transparent; }
+.remote-row-action.danger:hover { color: #dc2626; background: rgba(220, 38, 38, 0.1); }
+.remote-manager-empty {
+  padding: 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: center;
+}
+.remote-manager-form {
+  flex-shrink: 0;
+  padding: 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: 13px;
+  background: var(--glass-bg);
+}
+.remote-form-fields {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.35fr) minmax(220px, 1fr);
+  gap: 9px;
+  margin-top: 9px;
+}
+.remote-form-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+.remote-form-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  outline: none;
+  background: var(--dropdown-bg);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+}
+.remote-form-field input:focus {
+  border-color: var(--remote-color);
+  box-shadow: 0 0 0 3px var(--remote-bg);
+}
+.remote-form-status {
+  min-height: 16px;
+  padding-top: 6px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+.remote-form-status.error { color: #dc2626; }
+.remote-form-status.success { color: var(--remote-color); }
+.remote-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.remote-form-actions .btn,
+.remote-manager-footer .btn { padding: 6px 13px; font-size: 11px; }
+.remote-form-cancel,
+.remote-form-test { background: var(--glass-bg); color: var(--text-muted); }
+.remote-form-save,
+.remote-manager-footer .modal-confirm { background: color-mix(in srgb, var(--remote-color) 76%, transparent); color: white; }
+.remote-manager-footer { padding-top: 0; }
+.remote-manager-footer { flex-shrink: 0; }
+
+@media (max-width: 600px) {
+  .remote-form-fields { grid-template-columns: 1fr; }
+  .remote-manager-list { max-height: 220px; }
+}
 /* Branch text is never shown inside the chip — the inline chip next to the
    name already conveys the current branch in both modes. */
 .project-row .branch-text { display: none; }

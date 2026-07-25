@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 function defaultConfig() {
-  return { projects: [] };
+  return { projects: [], burst: true };
 }
 
 function normalizeConfig(parsed) {
@@ -12,6 +12,7 @@ function normalizeConfig(parsed) {
   return {
     ...config,
     projects: Array.isArray(config.projects) ? config.projects : [],
+    burst: typeof config.burst === 'boolean' ? config.burst : true,
   };
 }
 

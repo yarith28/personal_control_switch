@@ -18,9 +18,12 @@ import { setupCrossSync } from './js/cross-sync.js';
 import { setupCommitTool } from './js/commit-tool.js';
 import { setupIdentityTool } from './js/identity-tool.js';
 import { setupProjectDrop } from './js/project-drop.js';
+import { setupDragAutoScroll } from './js/drag-auto-scroll.js';
 import { hydrateStaticIcons } from './js/icons.js';
 import { basename, withButtonLoading } from './js/util.js';
 import { showToast } from './js/notify.js';
+import { normalizeAppRemotes, selectedAppRemote } from './js/app-remotes.mjs';
+import { confirmDialog } from './js/modal.js';
 
 let autoRefreshInitialized = false;
 let startupRefreshTriggered = false;
@@ -29,6 +32,7 @@ let gitProgressSubscribed = false;
 hydrateStaticIcons();
 setupTabs();
 setupProjectDrop();
+setupDragAutoScroll();
 
 // The frameless window makes <body> a drag region, so right-clicking anywhere
 // pops the OS window menu. Suppress the context menu to stop that.
@@ -74,13 +78,17 @@ fetchAllBtn.addEventListener('click', () =>
   withButtonLoading(fetchAllBtn, fetchAllProjects)
 );
 pullSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (p) => window.api.pull(p)))
+  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (path, project) => (
+    window.api.pull(path, selectedAppRemote(project))
+  )))
 );
 pushSelectedBtn.addEventListener('click', () =>
   withButtonLoading(pushSelectedBtn, () => batchOp('Pushing', pushWithUpstreamPrompt))
 );
 fetchSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (p) => window.api.fetch(p)))
+  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (path, project) => (
+    window.api.fetch(path, selectedAppRemote(project))
+  )))
 );
 selectAll.addEventListener('change', () => {
   const checked = selectAll.checked;
@@ -242,6 +250,66 @@ projectSearchInput?.addEventListener('keydown', (event) => {
     );
   }
 
+  const configFileChoose = document.getElementById('config-file-choose');
+  const configFileDefault = document.getElementById('config-file-default');
+  const configFilePath = document.getElementById('config-file-path');
+  let configLocation = await window.api.getConfigLocation();
+  const syncConfigLocation = () => {
+    const shownPath = state.homedir && configLocation.path.startsWith(state.homedir)
+      ? `~${configLocation.path.slice(state.homedir.length)}`
+      : configLocation.path;
+    configFilePath.textContent = configLocation.isEnvironmentOverride
+      ? `$${configLocation.environmentVariable} → ${shownPath}`
+      : shownPath;
+    configFilePath.title = configLocation.path;
+    configFileChoose.disabled = configLocation.isEnvironmentOverride;
+    configFileChoose.textContent = configLocation.isEnvironmentOverride ? 'Environment' : 'Choose…';
+    configFileChoose.title = configLocation.isEnvironmentOverride
+      ? `${configLocation.environmentVariable} overrides the configuration location.`
+      : `Choose a configuration file. Current: ${configLocation.path}`;
+    configFileDefault.hidden = configLocation.isDefault || configLocation.isEnvironmentOverride;
+    configFileDefault.title = `Use the default configuration: ${configLocation.defaultPath}`;
+  };
+  syncConfigLocation();
+
+  configFileChoose?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (configLocation.isEnvironmentOverride) return;
+    const selectedPath = await window.api.pickConfigFile();
+    if (!selectedPath || selectedPath === configLocation.path) return;
+    const confirmed = await confirmDialog({
+      message: 'Load this configuration file?',
+      detail: `${selectedPath}\n\nGit Sync will reload using the projects and settings from this file. The current configuration file will not be deleted.`,
+      confirmText: 'Load config',
+      danger: false,
+    });
+    if (!confirmed) return;
+    const result = await window.api.setConfigLocation(selectedPath);
+    if (!result?.ok) {
+      showToast('Could not load configuration', result?.error || 'The selected file could not be used.', { tone: 'error' });
+      return;
+    }
+    window.location.reload();
+  });
+
+  configFileDefault?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const confirmed = await confirmDialog({
+      message: 'Use the default configuration file?',
+      detail: `${configLocation.defaultPath}\n\nGit Sync will reload from the default location. The current configuration file will not be deleted.`,
+      confirmText: 'Use default',
+      danger: false,
+    });
+    if (!confirmed) return;
+    const result = await window.api.resetConfigLocation();
+    if (!result?.ok) {
+      showToast('Could not reset configuration', result?.error || 'The default location could not be restored.', { tone: 'error' });
+      return;
+    }
+    configLocation = result;
+    window.location.reload();
+  });
+
   state.currentTheme = THEMES.find((t) => t.id === config.theme) || THEMES[0];
   applyTheme(state.currentTheme);
   buildSwatches();
@@ -298,18 +366,29 @@ projectSearchInput?.addEventListener('keydown', (event) => {
     rawItems.some((i) => i.type === 'folder') ||
     rawItems.every((i) => i.type !== 'group');
 
-  const hydrateProject = (p) => ({
-    type: 'project',
-    path: p.path,
-    pinned: !!p.pinned,
-    selected: false,
-    branches: p.branches || null,
-    current:  p.current  || null,
-    ahead:    typeof p.ahead  === 'number' ? p.ahead  : null,
-    behind:   typeof p.behind === 'number' ? p.behind : null,
-    uncommitted: typeof p.uncommitted === 'number' ? p.uncommitted : 0,
-    error:    null,
-  });
+  const hydrateProject = (p) => {
+    const appRemotes = normalizeAppRemotes(p.appRemotes);
+    return {
+      type: 'project',
+      path: p.path,
+      pinned: !!p.pinned,
+      selected: false,
+      branches: p.branches || null,
+      current:  p.current  || null,
+      hasUpstream: typeof p.hasUpstream === 'boolean'
+        ? p.hasUpstream
+        : (typeof p.ahead === 'number' || typeof p.behind === 'number' ? true : null),
+      upstream: p.upstream || null,
+      ahead:    typeof p.ahead  === 'number' ? p.ahead  : null,
+      behind:   typeof p.behind === 'number' ? p.behind : null,
+      uncommitted: typeof p.uncommitted === 'number' ? p.uncommitted : 0,
+      appRemotes,
+      selectedRemoteId: appRemotes.some((remote) => remote.id === p.selectedRemoteId)
+        ? p.selectedRemoteId
+        : null,
+      error:    null,
+    };
+  };
 
   if (isAlreadyNested) {
     for (const entry of rawItems) {

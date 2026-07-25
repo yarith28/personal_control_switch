@@ -1,13 +1,21 @@
 import { state } from './state.js';
+import { normalizeAppRemotes } from './app-remotes.mjs';
 
 function serializeProject(p) {
   const out = { type: 'project', path: p.path };
   if (p.pinned) out.pinned = true;
   if (p.branches) out.branches = p.branches;
   if (p.current) out.current = p.current;
+  if (typeof p.hasUpstream === 'boolean') out.hasUpstream = p.hasUpstream;
+  if (p.upstream) out.upstream = p.upstream;
   if (typeof p.ahead === 'number')  out.ahead  = p.ahead;
   if (typeof p.behind === 'number') out.behind = p.behind;
   if (typeof p.uncommitted === 'number') out.uncommitted = p.uncommitted;
+  const appRemotes = normalizeAppRemotes(p.appRemotes);
+  if (appRemotes.length) out.appRemotes = appRemotes;
+  if (appRemotes.some((remote) => remote.id === p.selectedRemoteId)) {
+    out.selectedRemoteId = p.selectedRemoteId;
+  }
   return out;
 }
 

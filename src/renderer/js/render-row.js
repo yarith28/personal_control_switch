@@ -10,6 +10,8 @@ import { renderProjects } from './render-list.js';
 import { createBranchPicker } from './branch-picker.js';
 import { createProjectOpenMenu } from './project-open-menu.js';
 import { showToast } from './notify.js';
+import { startDragAutoScroll, stopDragAutoScroll } from './drag-auto-scroll.js';
+import { createRemoteTag } from './remote-manager.js';
 
 function rawGitOutput(result) {
   return String(
@@ -94,7 +96,9 @@ export function renderRow(project, parentFolder = null) {
       try {
         const res = await window.api.checkout(project.path, branch);
         if (res.ok) {
-          project.current = branch;
+          await refreshBranches(project);
+          branchPicker.setBranches(project.branches || [], project.current, project.current);
+          syncBranchUpstreamState();
           log(`[${basename(project.path)}] switched to ${branch}`, true);
           return true;
         }
@@ -126,6 +130,7 @@ export function renderRow(project, parentFolder = null) {
 
         await refreshBranches(project);
         branchPicker.setBranches(project.branches || [], project.current, project.current);
+        syncBranchUpstreamState();
         log(`[${basename(project.path)}] created and switched to ${branch}`, true);
         showToast('Branch created', branch);
         return true;
@@ -135,9 +140,34 @@ export function renderRow(project, parentFolder = null) {
     },
   });
   const nameBranch = branchPicker.el;
+  const syncBranchUpstreamState = () => {
+    const noUpstream = project.hasUpstream === false && !!project.current;
+    nameBranch.classList.toggle('no-upstream', noUpstream);
+    nameBranch.title = noUpstream
+      ? 'No upstream branch configured. Click to switch branches.'
+      : 'Switch branch';
+    nameBranch.setAttribute(
+      'aria-label',
+      noUpstream
+        ? `${project.current}, no upstream branch configured`
+        : `Current branch ${project.current || 'unknown'}`
+    );
+  };
   branchPicker.setBranches(project.branches || [], project.current, project.current);
+  syncBranchUpstreamState();
+  const remoteTag = createRemoteTag(project, {
+    disabled: () => state.organizeMode || state.multiSelect || row.classList.contains('busy'),
+    onChange: async () => {
+      project.ahead = null;
+      project.behind = null;
+      await refreshBranches(project);
+      renderProjects();
+    },
+  });
+  remoteTag.hidden = !project.branches;
   nameInner.appendChild(nameText);
   nameInner.appendChild(nameBranch);
+  nameInner.appendChild(remoteTag);
   name.appendChild(nameInner);
 
   const pinBtn = document.createElement('button');
@@ -317,9 +347,11 @@ const moveBtn = document.createElement('button');
   row.addEventListener('dragstart', (e) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', 'PROJECT:' + project.path);
+    startDragAutoScroll();
     setTimeout(() => row.classList.add('dragging'), 0);
   });
   row.addEventListener('dragend', () => {
+    stopDragAutoScroll();
     row.draggable = state.organizeMode;
     row.classList.remove('dragging');
     document.querySelectorAll('.project-row, .group-header').forEach((r) => r.classList.remove('drag-over'));
@@ -337,6 +369,7 @@ const moveBtn = document.createElement('button');
   row.addEventListener('drop', async (e) => {
     if (!state.organizeMode) return;
     e.preventDefault();
+    stopDragAutoScroll();
     row.classList.remove('drag-over');
     const data = e.dataTransfer.getData('text/plain');
 

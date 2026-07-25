@@ -7,6 +7,7 @@ Git Sync is a desktop dashboard for working with multiple Git repositories. It k
 - Track repositories individually or organize them into folders
 - Search by repository name, path, or branch
 - Fetch, pull, or push one repository, a folder, a selection, or the full list
+- Route a project through an app-managed remote URL without changing its Git configuration
 - Run batch operations sequentially or in parallel with Burst mode
 - Cancel an active fetch, pull, or push; stalled Git commands time out automatically
 - Switch local branches and open a repository in a terminal, file manager, VS Code, SourceTree, or another supported tool
@@ -15,6 +16,7 @@ Git Sync is a desktop dashboard for working with multiple Git repositories. It k
 - Inspect commit history and safely rewrite supported commit metadata with Commit Tool
 - Manage global Git identity and per-project identity overrides with Identity Tool
 - Choose themes, fonts, and compact layout
+- Load the app configuration from a chosen JSON file or return to the default location
 
 ## Requirements
 
@@ -38,6 +40,14 @@ pnpm install --frozen-lockfile
 ```
 
 The project post-install step downloads the Electron runtime automatically. No separate Electron command is required.
+
+Set `GIT_SYNC_CONFIG_PATH` to override the configuration location for a launch. Use an absolute path or a path beginning with `~/`:
+
+```bash
+GIT_SYNC_CONFIG_PATH=~/shared/git_sync_config.json pnpm start
+```
+
+The environment override takes priority without replacing the location saved in Settings. Removing it restores the previous location.
 
 ## Run
 
@@ -72,12 +82,14 @@ The included packaging configuration does not sign installers. Public distributi
 
 ## Safety and recovery
 
-- Pull and push use Git's existing behavior and configuration. If a push has no upstream, the app can set one after confirmation using the configured push remote, `origin`, or the repository's only remote. The app does not choose a merge or rebase strategy for you.
+- Repository-default pull and push use Git's existing behavior and configuration. If a push has no upstream, the app can set one after confirmation using the configured push remote, `origin`, or the repository's only remote.
+- App-managed remotes are stored by Git Sync, not in `.git/config`. Their selected URL is used directly for fetch and push; pull fetches that URL and only fast-forwards the matching local branch.
 - Git credential prompts are disabled inside the app so an operation cannot wait on an invisible terminal prompt. Configure credentials with your normal Git tooling.
 - Fetch, pull, and push can be cancelled from the repository row. Network operations time out after five minutes; other Git commands time out after two minutes.
 - Commit Tool only rewrites clean, linear local history. It creates a temporary backup branch, updates the branch with compare-and-swap semantics, verifies the result, and attempts an automatic rollback if verification fails.
 - Cross Sync refuses dirty target working trees and aborts a conflicted rebase.
 - Configuration saves are atomic. Before replacing a valid configuration, the app keeps a last known-good backup. An unreadable configuration is preserved and recovery is reported in the app.
+- The default configuration is `~/git_sync_config.json`. A custom location is remembered by a small pointer file in the app data directory. Switching locations does not delete or move either configuration file.
 
 ## Basic usage
 
