@@ -225,6 +225,35 @@ test('Remote Manager lists repository remotes and swaps the selected remote URL'
     hasExplicitPushUrl: true,
   }]);
 
+  const added = await handlers.get('add-git-remote')(
+    null,
+    repo,
+    'upstream',
+    secondRemote
+  );
+  assert.equal(added.ok, true, added.errorSummary);
+  assert.equal(added.remote.name, 'upstream');
+  assert.equal(added.remote.url, secondRemote);
+  assert.equal((await git(repo, 'remote', 'get-url', 'upstream')).stdout.trim(), secondRemote);
+
+  const duplicate = await handlers.get('add-git-remote')(
+    null,
+    repo,
+    'upstream',
+    firstRemote
+  );
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.errorCode, 'GIT_REMOTE_EXISTS');
+
+  const invalid = await handlers.get('add-git-remote')(
+    null,
+    repo,
+    'not a remote',
+    firstRemote
+  );
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errorSummary, /valid Git remote name/i);
+
   const swapped = await handlers.get('set-git-remote-url')(
     null,
     repo,
@@ -240,7 +269,7 @@ test('Remote Manager lists repository remotes and swaps the selected remote URL'
   const missing = await handlers.get('set-git-remote-url')(
     null,
     repo,
-    'upstream',
+    'missing',
     firstRemote
   );
   assert.equal(missing.ok, false);

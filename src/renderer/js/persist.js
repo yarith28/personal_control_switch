@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { normalizeAppRemotes } from './app-remotes.mjs';
+import { normalizeRemoteUrlOptions } from './remote-url-options.mjs';
 
 function serializeProject(p) {
   const out = { type: 'project', path: p.path };
@@ -13,9 +14,8 @@ function serializeProject(p) {
   if (typeof p.uncommitted === 'number') out.uncommitted = p.uncommitted;
   const appRemotes = normalizeAppRemotes(p.appRemotes);
   if (appRemotes.length) out.appRemotes = appRemotes;
-  if (typeof p.selectedRemoteName === 'string' && p.selectedRemoteName.trim()) {
-    out.selectedRemoteName = p.selectedRemoteName.trim();
-  }
+  const remoteUrls = normalizeRemoteUrlOptions(p.remoteUrls);
+  if (remoteUrls.length) out.remoteUrls = remoteUrls;
   return out;
 }
 

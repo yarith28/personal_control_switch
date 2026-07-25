@@ -100,7 +100,7 @@ function validateGitRemoteName(value) {
     return {
       ok: false,
       errorCode: 'INVALID_GIT_REMOTE',
-      errorSummary: 'The selected Git remote is invalid.',
+      errorSummary: 'The Git remote name is invalid.',
       errorRaw: '',
     };
   }
@@ -467,6 +467,52 @@ ipcMain.handle('fetch', async (event, repoPath, appRemoteValue = null) => {
 
 ipcMain.handle('get-git-remotes', async (_, repoPath) => {
   return await listGitRemotes(repoPath);
+});
+
+ipcMain.handle('add-git-remote', async (_, repoPath, remoteNameValue, urlValue) => {
+  const remoteName = validateGitRemoteName(remoteNameValue);
+  if (!remoteName.ok) return remoteName;
+  const remoteUrl = validateRemoteUrl(urlValue);
+  if (!remoteUrl.ok) return remoteUrl;
+
+  const remotesResult = await listGitRemotes(repoPath);
+  if (!remotesResult.ok) return remotesResult;
+  if (remotesResult.remotes.some((remote) => remote.name === remoteName.name)) {
+    return {
+      ok: false,
+      errorCode: 'GIT_REMOTE_EXISTS',
+      errorSummary: `Remote ${remoteName.name} already exists.`,
+      errorRaw: '',
+    };
+  }
+
+  const added = await runGit(
+    ['remote', 'add', remoteName.name, remoteUrl.url],
+    repoPath
+  );
+  if (!added.ok) {
+    added.errorSummary = /valid remote name/i.test(added.errorRaw || '')
+      ? 'Enter a valid Git remote name.'
+      : `Could not add remote ${remoteName.name}.`;
+    return added;
+  }
+
+  const refreshed = await listGitRemotes(repoPath);
+  const remote = refreshed.ok
+    ? refreshed.remotes.find((entry) => entry.name === remoteName.name)
+    : null;
+  if (!remote || remote.url !== remoteUrl.url) {
+    const rollback = await runGit(['remote', 'remove', remoteName.name], repoPath);
+    return {
+      ok: false,
+      errorCode: 'REMOTE_ADD_VERIFY_FAILED',
+      errorSummary: rollback.ok
+        ? `Git did not retain remote ${remoteName.name}. The incomplete remote was removed.`
+        : `Git did not retain remote ${remoteName.name}, and the incomplete remote could not be removed.`,
+      errorRaw: refreshed.errorRaw || rollback.errorRaw || '',
+    };
+  }
+  return { ok: true, remote };
 });
 
 ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlValue) => {

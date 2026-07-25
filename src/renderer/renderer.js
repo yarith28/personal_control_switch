@@ -23,6 +23,7 @@ import { hydrateStaticIcons } from './js/icons.js';
 import { basename, withButtonLoading } from './js/util.js';
 import { showToast } from './js/notify.js';
 import { normalizeAppRemotes } from './js/app-remotes.mjs';
+import { normalizeRemoteUrlOptions } from './js/remote-url-options.mjs';
 import { confirmDialog } from './js/modal.js';
 
 let autoRefreshInitialized = false;
@@ -379,6 +380,7 @@ projectSearchInput?.addEventListener('keydown', (event) => {
       behind:   typeof p.behind === 'number' ? p.behind : null,
       uncommitted: typeof p.uncommitted === 'number' ? p.uncommitted : 0,
       appRemotes,
+      remoteUrls: normalizeRemoteUrlOptions(p.remoteUrls),
       selectedRemoteId: null,
       selectedRemoteName: typeof p.selectedRemoteName === 'string'
         ? p.selectedRemoteName.trim()

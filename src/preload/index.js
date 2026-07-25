@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('api', {
   openWith: (repoPath, target) => ipcRenderer.invoke('open-with', repoPath, target),
   fetch: (repoPath, appRemote = null) => ipcRenderer.invoke('fetch', repoPath, appRemote),
   getGitRemotes: (repoPath) => ipcRenderer.invoke('get-git-remotes', repoPath),
+  addGitRemote: (repoPath, remoteName, url) => (
+    ipcRenderer.invoke('add-git-remote', repoPath, remoteName, url)
+  ),
   setGitRemoteUrl: (repoPath, remoteName, url) => (
     ipcRenderer.invoke('set-git-remote-url', repoPath, remoteName, url)
   ),
