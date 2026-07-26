@@ -65,6 +65,7 @@ const ensureConfigLocation = async () => {
 const configStore = createConfigStore({ getConfigPath: configLocationStore.getPath });
 
 const APP_REMOTE_ID_PATTERN = /^[a-z0-9_-]{1,80}$/i;
+const MANUAL_FETCH_TIMEOUT_MS = 60 * 1000;
 
 function resolveAppRemote(value) {
   if (value == null) return { ok: true, remote: null };
@@ -181,18 +182,70 @@ async function currentBranch(repoPath) {
   return { ok: true, branch };
 }
 
-function fetchAppRemote(event, repoPath, remote) {
+async function resolveCurrentBranchGitRemote(repoPath) {
+  const branchResult = await currentBranch(repoPath);
+  if (!branchResult.ok) return branchResult;
+
+  const remotesResult = await listGitRemotes(repoPath);
+  if (!remotesResult.ok) return remotesResult;
+  const names = remotesResult.remotes.map((remote) => remote.name);
+  const configuredResult = await runGit(
+    ['config', '--get', `branch.${branchResult.branch}.remote`],
+    repoPath
+  );
+  const configured = configuredResult.ok ? configuredResult.stdout.trim() : '';
+  const remoteName = names.includes(configured)
+    ? configured
+    : names.includes('origin')
+      ? 'origin'
+      : names.length === 1
+        ? names[0]
+        : '';
+
+  if (!remoteName) {
+    return {
+      ok: false,
+      errorCode: 'AMBIGUOUS_REMOTE',
+      errorSummary: names.length
+        ? 'Select a remote before fetching this branch.'
+        : 'Add a Git remote before fetching this branch.',
+      errorRaw: names.length ? `Available remotes: ${names.join(', ')}` : '',
+    };
+  }
+
+  return {
+    ok: true,
+    branch: branchResult.branch,
+    remote: remotesResult.remotes.find((remote) => remote.name === remoteName),
+  };
+}
+
+function fetchGitRemoteBranch(event, repoPath, remoteName, branch, timeoutMs) {
   return runGitStreaming(
     [
       'fetch',
-      '--prune',
+      '--no-tags',
+      remoteName,
+      `+refs/heads/${branch}:refs/remotes/${remoteName}/${branch}`,
+    ],
+    repoPath,
+    (payload) => sendGitProgress(event, repoPath, payload),
+    timeoutMs ? { timeoutMs } : undefined
+  );
+}
+
+function fetchAppRemote(event, repoPath, remote, branch, timeoutMs) {
+  return runGitStreaming(
+    [
+      'fetch',
       '--no-tags',
       '--',
       remote.url,
-      `+refs/heads/*:${appRemoteRef(remote.id)}/*`,
+      `+refs/heads/${branch}:${appRemoteRef(remote.id, branch)}`,
     ],
     repoPath,
-    (payload) => sendGitProgress(event, repoPath, payload)
+    (payload) => sendGitProgress(event, repoPath, payload),
+    timeoutMs ? { timeoutMs } : undefined
   );
 }
 
@@ -449,9 +502,19 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   const configuredRemoteResult = currentName
     ? await runGit(['config', '--get', `branch.${currentName}.remote`], repoPath)
     : null;
-  const configuredRemote = configuredRemoteResult?.ok
+  const configuredRemoteName = configuredRemoteResult?.ok
     ? configuredRemoteResult.stdout.trim()
     : null;
+  const remoteNamesResult = await runGit(['remote'], repoPath);
+  const remoteNames = remoteNamesResult.ok
+    ? remoteNamesResult.stdout.split(/\r?\n/).map((name) => name.trim()).filter(Boolean)
+    : [];
+  const configuredRemote = remoteNames.includes(configuredRemoteName)
+    ? configuredRemoteName
+    : null;
+  const defaultRemote = configuredRemote
+    || (remoteNames.includes('origin') ? 'origin' : null)
+    || (remoteNames.length === 1 ? remoteNames[0] : null);
   const configuredRemoteUrlResult = configuredRemote
     ? await runGit(['remote', 'get-url', configuredRemote], repoPath)
     : null;
@@ -483,6 +546,7 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
     hasRemoteBranch: gitRemoteResult.remote || appRemote ? comparisonExists.ok : null,
     activeRemote: gitRemoteResult.remote?.name || null,
     configuredRemote,
+    defaultRemote,
     configuredRemoteUrl: configuredRemoteUrlResult?.ok
       ? configuredRemoteUrlResult.stdout.trim()
       : null,
@@ -496,20 +560,38 @@ ipcMain.handle('fetch', async (event, repoPath, appRemoteValue = null) => {
   const gitRemoteResult = await resolveGitRemoteTarget(appRemoteValue, repoPath);
   if (!gitRemoteResult.ok) return gitRemoteResult;
   if (gitRemoteResult.remote) {
-    return await runGitStreaming(
-      ['fetch', '--prune', gitRemoteResult.remote.name],
+    const branchResult = await currentBranch(repoPath);
+    if (!branchResult.ok) return branchResult;
+    return await fetchGitRemoteBranch(
+      event,
       repoPath,
-      (payload) => sendGitProgress(event, repoPath, payload)
+      gitRemoteResult.remote.name,
+      branchResult.branch,
+      MANUAL_FETCH_TIMEOUT_MS
     );
   }
   const appRemoteResult = resolveAppRemote(appRemoteValue);
   if (!appRemoteResult.ok) return appRemoteResult;
   if (appRemoteResult.remote) {
-    return await fetchAppRemote(event, repoPath, appRemoteResult.remote);
+    const branchResult = await currentBranch(repoPath);
+    if (!branchResult.ok) return branchResult;
+    return await fetchAppRemote(
+      event,
+      repoPath,
+      appRemoteResult.remote,
+      branchResult.branch,
+      MANUAL_FETCH_TIMEOUT_MS
+    );
   }
-  return await runGitStreaming(['fetch', '--prune'], repoPath, (payload) => {
-    sendGitProgress(event, repoPath, payload);
-  });
+  const target = await resolveCurrentBranchGitRemote(repoPath);
+  if (!target.ok) return target;
+  return await fetchGitRemoteBranch(
+    event,
+    repoPath,
+    target.remote.name,
+    target.branch,
+    MANUAL_FETCH_TIMEOUT_MS
+  );
 });
 
 ipcMain.handle('get-git-remotes', async (_, repoPath) => {
@@ -845,7 +927,12 @@ ipcMain.handle('pull', async (event, repoPath, appRemoteValue = null) => {
   if (appRemoteResult.remote) {
     const branchResult = await currentBranch(repoPath);
     if (!branchResult.ok) return branchResult;
-    const fetched = await fetchAppRemote(event, repoPath, appRemoteResult.remote);
+    const fetched = await fetchAppRemote(
+      event,
+      repoPath,
+      appRemoteResult.remote,
+      branchResult.branch
+    );
     if (!fetched.ok) return fetched;
 
     const remoteRef = appRemoteRef(appRemoteResult.remote.id, branchResult.branch);

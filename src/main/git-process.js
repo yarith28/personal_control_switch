@@ -318,10 +318,12 @@ function createGitService({
     return runGitProcess(args, cwd, { input, envOverrides });
   }
 
-  function runGitStreaming(args, cwd, onProgress) {
+  function runGitStreaming(args, cwd, onProgress, {
+    timeoutMs = streamingTimeoutMs,
+  } = {}) {
     return runGitProcess(args, cwd, {
       onProgress,
-      timeoutMs: streamingTimeoutMs,
+      timeoutMs,
       cancellable: true,
       liveOutput: true,
     });

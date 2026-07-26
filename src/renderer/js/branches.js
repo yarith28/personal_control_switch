@@ -43,6 +43,7 @@ export async function refreshBranches(project) {
     project.upstream    = res.upstream || null;
     project.activeRemote = res.activeRemote || null;
     project.configuredRemote = res.configuredRemote || null;
+    project.defaultRemote = res.defaultRemote || null;
     project.ahead       = res.ahead;
     project.behind      = res.behind;
     project.uncommitted = res.uncommitted ?? 0;
@@ -53,6 +54,8 @@ export async function refreshBranches(project) {
     project.current = null;
     project.hasUpstream = null;
     project.upstream = null;
+    project.configuredRemote = null;
+    project.defaultRemote = null;
     project.uncommitted = 0;
     project.error = res.error;
     project.missing = !!res.missing;

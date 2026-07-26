@@ -64,3 +64,17 @@ test('Git operations are terminated after their configured timeout', { skip: pro
   assert.equal(result.timedOut, true);
   assert.equal(result.errorSummary, 'Git operation timed out.');
 });
+
+test('streaming Git operations accept a per-operation timeout', { skip: process.platform === 'win32' }, async (t) => {
+  const { dir } = await withRepo(t);
+  const service = createGitService({ streamingTimeoutMs: 5000 });
+  const result = await service.runGitStreaming(
+    ['-c', 'alias.wait=!sleep 5', 'wait'],
+    dir,
+    undefined,
+    { timeoutMs: 60 }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.errorSummary, 'Git operation timed out.');
+});

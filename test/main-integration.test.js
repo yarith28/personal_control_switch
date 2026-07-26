@@ -113,6 +113,8 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   const localOnly = await handlers.get('get-branches')(null, second);
   assert.equal(localOnly.hasUpstream, false);
   assert.equal(localOnly.upstream, null);
+  assert.equal(localOnly.configuredRemote, null);
+  assert.equal(localOnly.defaultRemote, 'origin');
 
   const noUpstream = await handlers.get('push')(progressEvent, second);
   assert.equal(noUpstream.ok, false);
@@ -175,9 +177,16 @@ test('app-managed remote operations use one URL without changing Git configurati
   assert.equal((await handlers.get('test-app-remote')(null, target, appRemote)).ok, true);
   await commitFile(source, 'shared.txt', 'two\n', 'source update');
   await git(source, 'push', remote, 'main:main');
+  await git(source, 'checkout', '-b', 'other');
+  await commitFile(source, 'other.txt', 'other\n', 'other branch');
+  await git(source, 'push', remote, 'other:other');
+  await git(source, 'checkout', 'main');
 
   const fetched = await handlers.get('fetch')(progressEvent, target, appRemote);
   assert.equal(fetched.ok, true, fetched.errorSummary);
+  await assert.rejects(
+    git(target, 'rev-parse', '--verify', 'refs/git-sync/remotes/team_remote/other')
+  );
   const status = await handlers.get('get-branches')(null, target, appRemote);
   assert.equal(status.ok, true);
   assert.equal(status.hasRemoteBranch, true);
@@ -299,6 +308,10 @@ test('the selected Git remote drives fetch, comparison, pull, and push', async (
   await git(selectedSource, 'config', 'user.email', 'integration@example.com');
   await commitFile(selectedSource, 'shared.txt', 'two\n', 'selected update');
   await git(selectedSource, 'push', 'origin', 'main');
+  await git(selectedSource, 'checkout', '-b', 'other');
+  await commitFile(selectedSource, 'other.txt', 'other\n', 'other branch');
+  await git(selectedSource, 'push', 'origin', 'other');
+  await git(selectedSource, 'checkout', 'main');
 
   await git(root, 'clone', origin, target);
   await git(target, 'config', 'user.name', 'Integration Test');
@@ -318,6 +331,7 @@ test('the selected Git remote drives fetch, comparison, pull, and push', async (
 
   const fetched = await handlers.get('fetch')(progressEvent, target, activeRemote);
   assert.equal(fetched.ok, true, fetched.errorSummary);
+  await assert.rejects(git(target, 'rev-parse', '--verify', 'refs/remotes/job23/other'));
   const status = await handlers.get('get-branches')(null, target, activeRemote);
   assert.equal(status.ok, true);
   assert.equal(status.activeRemote, 'job23');

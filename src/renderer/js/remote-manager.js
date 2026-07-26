@@ -69,7 +69,7 @@ export function createRemoteTag(project, { disabled = () => false, onChange } = 
 
   const sync = () => {
     const selected = selectedRemoteUrlOption(project);
-    const fallback = remoteFromUpstream(project);
+    const fallback = project.defaultRemote || remoteFromUpstream(project);
     const label = selected?.remoteName || fallback || 'Remote';
     tag.textContent = label;
     tag.classList.toggle('unset', label === 'Remote');
