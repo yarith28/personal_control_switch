@@ -229,6 +229,7 @@ export async function doFetch(project) {
     failureLabel: 'fetch failed',
     action: (repoPath) => window.api.fetch(repoPath),
     warnLongRunning: true,
+    notifyOnFailure: true,
     cancellable: true,
   });
 }
