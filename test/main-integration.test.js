@@ -87,6 +87,45 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   await git(second, 'config', 'user.name', 'Integration Test');
   await git(second, 'config', 'user.email', 'integration@example.com');
 
+  await git(first, 'checkout', '-b', 'feature/remote-only');
+  await commitFile(first, 'remote.txt', 'remote branch\n', 'remote branch');
+  await git(first, 'push', '-u', 'origin', 'feature/remote-only');
+  await git(first, 'checkout', 'main');
+  await git(
+    second,
+    'fetch',
+    'origin',
+    'refs/heads/feature/remote-only:refs/remotes/origin/feature/remote-only'
+  );
+
+  const withRemoteBranches = await handlers.get('get-branches')(null, second);
+  assert.equal(withRemoteBranches.ok, true);
+  assert.ok(withRemoteBranches.remoteBranches.includes('origin/feature/remote-only'));
+  assert.ok(!withRemoteBranches.remoteBranches.includes('origin/HEAD'));
+
+  const remoteCheckout = await handlers.get('checkout-remote-branch')(
+    null,
+    second,
+    'origin/feature/remote-only'
+  );
+  assert.equal(remoteCheckout.ok, true, remoteCheckout.errorSummary);
+  assert.equal(remoteCheckout.created, true);
+  assert.equal(remoteCheckout.branch, 'feature/remote-only');
+  assert.equal((await git(second, 'branch', '--show-current')).stdout.trim(), 'feature/remote-only');
+  assert.equal(
+    (await git(second, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')).stdout.trim(),
+    'origin/feature/remote-only'
+  );
+  await git(second, 'checkout', 'main');
+  const existingRemoteCheckout = await handlers.get('checkout-remote-branch')(
+    null,
+    second,
+    'origin/feature/remote-only'
+  );
+  assert.equal(existingRemoteCheckout.ok, true, existingRemoteCheckout.errorSummary);
+  assert.equal(existingRemoteCheckout.created, false);
+  await git(second, 'checkout', 'main');
+
   await commitFile(first, 'shared.txt', 'two\n', 'from first');
   assert.equal((await handlers.get('push')(progressEvent, first)).ok, true);
   assert.equal((await handlers.get('fetch')(progressEvent, second)).ok, true);
@@ -215,53 +254,42 @@ test('Remote Manager lists repository remotes and swaps the selected remote URL'
   const root = await makeTempDir(t, 'git-sync-remote-manager-');
   const firstRemote = path.join(root, 'first.git');
   const secondRemote = path.join(root, 'second.git');
+  const pushRemote = path.join(root, 'push.git');
   const repo = path.join(root, 'repo');
   await fs.mkdir(firstRemote);
   await git(firstRemote, 'init', '--bare');
   await fs.mkdir(secondRemote);
   await git(secondRemote, 'init', '--bare');
+  await fs.mkdir(pushRemote);
+  await git(pushRemote, 'init', '--bare');
   await fs.mkdir(repo);
   await initRepo(repo);
   await git(repo, 'remote', 'add', 'origin', firstRemote);
-  await git(repo, 'remote', 'set-url', '--push', '--add', 'origin', firstRemote);
+  await git(repo, 'remote', 'set-url', '--push', '--add', 'origin', pushRemote);
+  await git(repo, 'remote', 'add', 'job23', secondRemote);
+  await git(repo, 'config', 'branch.main.remote', 'job23');
+  await git(repo, 'config', 'branch.main.merge', 'refs/heads/main');
 
   const listed = await handlers.get('get-git-remotes')(null, repo);
   assert.equal(listed.ok, true);
-  assert.deepEqual(listed.remotes, [{
+  assert.deepEqual(listed.remotes.map((remote) => remote.name), ['job23', 'origin']);
+  const originInfo = listed.remotes.find((remote) => remote.name === 'origin');
+  assert.deepEqual(originInfo, {
     name: 'origin',
     url: firstRemote,
-    pushUrl: firstRemote,
+    urls: [firstRemote],
+    pushUrl: pushRemote,
+    pushUrls: [pushRemote],
     hasExplicitPushUrl: true,
-  }]);
+  });
+  assert.equal(handlers.has('add-git-remote'), false);
+  assert.equal(handlers.has('set-active-git-remote'), false);
 
-  const added = await handlers.get('add-git-remote')(
-    null,
-    repo,
-    'upstream',
-    secondRemote
-  );
-  assert.equal(added.ok, true, added.errorSummary);
-  assert.equal(added.remote.name, 'upstream');
-  assert.equal(added.remote.url, secondRemote);
-  assert.equal((await git(repo, 'remote', 'get-url', 'upstream')).stdout.trim(), secondRemote);
-
-  const duplicate = await handlers.get('add-git-remote')(
-    null,
-    repo,
-    'upstream',
-    firstRemote
-  );
-  assert.equal(duplicate.ok, false);
-  assert.equal(duplicate.errorCode, 'GIT_REMOTE_EXISTS');
-
-  const invalid = await handlers.get('add-git-remote')(
-    null,
-    repo,
-    'not a remote',
-    firstRemote
-  );
-  assert.equal(invalid.ok, false);
-  assert.match(invalid.errorSummary, /valid Git remote name/i);
+  const startup = await handlers.get('get-branches')(null, repo);
+  assert.equal(startup.ok, true);
+  assert.deepEqual(startup.gitRemotes, listed.remotes);
+  assert.equal(startup.configuredRemote, 'job23');
+  const branchRemoteBefore = (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim();
 
   const swapped = await handlers.get('set-git-remote-url')(
     null,
@@ -273,7 +301,11 @@ test('Remote Manager lists repository remotes and swaps the selected remote URL'
   assert.equal(swapped.previousUrl, firstRemote);
   assert.equal(swapped.remote.url, secondRemote);
   assert.equal((await git(repo, 'remote', 'get-url', 'origin')).stdout.trim(), secondRemote);
-  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'origin')).stdout.trim(), secondRemote);
+  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'origin')).stdout.trim(), pushRemote);
+  assert.equal(
+    (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim(),
+    branchRemoteBefore
+  );
 
   const missing = await handlers.get('set-git-remote-url')(
     null,
@@ -285,7 +317,7 @@ test('Remote Manager lists repository remotes and swaps the selected remote URL'
   assert.equal(missing.errorCode, 'GIT_REMOTE_NOT_FOUND');
 });
 
-test('the selected Git remote drives fetch, comparison, pull, and push', async (t) => {
+test('normal branch configuration drives fetch, comparison, pull, and push', async (t) => {
   const root = await makeTempDir(t, 'git-sync-selected-remote-');
   const origin = path.join(root, 'origin.git');
   const selected = path.join(root, 'selected.git');
@@ -317,38 +349,30 @@ test('the selected Git remote drives fetch, comparison, pull, and push', async (
   await git(target, 'config', 'user.name', 'Integration Test');
   await git(target, 'config', 'user.email', 'integration@example.com');
   await git(target, 'remote', 'add', 'job23', selected);
-  const activeRemote = { type: 'git-remote', name: 'job23' };
+  await commitFile(source, 'shared.txt', 'origin update\n', 'origin update');
+  await git(source, 'push', 'origin', 'main');
+  const selectedHead = (await git(selected, 'rev-parse', 'refs/heads/main')).stdout.trim();
 
-  const activated = await handlers.get('set-active-git-remote')(null, target, 'job23');
-  assert.equal(activated.ok, true, activated.errorSummary);
-  assert.equal(activated.previousRemote, 'origin');
-  assert.equal(activated.activeRemote, 'job23');
-  assert.equal(activated.upstream, 'job23/main');
-  assert.equal((await git(target, 'config', '--get', 'branch.main.remote')).stdout.trim(), 'job23');
-
-  const listed = await handlers.get('get-git-remotes')(null, target);
-  assert.equal(listed.activeRemote, 'job23');
-
-  const fetched = await handlers.get('fetch')(progressEvent, target, activeRemote);
+  assert.equal((await git(target, 'config', '--get', 'branch.main.remote')).stdout.trim(), 'origin');
+  const fetched = await handlers.get('fetch')(progressEvent, target);
   assert.equal(fetched.ok, true, fetched.errorSummary);
   await assert.rejects(git(target, 'rev-parse', '--verify', 'refs/remotes/job23/other'));
-  const status = await handlers.get('get-branches')(null, target, activeRemote);
+  const status = await handlers.get('get-branches')(null, target);
   assert.equal(status.ok, true);
-  assert.equal(status.activeRemote, 'job23');
-  assert.equal(status.configuredRemote, 'job23');
-  assert.equal(status.configuredRemoteUrl, selected);
+  assert.equal(status.configuredRemote, 'origin');
+  assert.equal(status.configuredRemoteUrl, origin);
   assert.equal(status.behind, 1);
 
-  const pulled = await handlers.get('pull')(progressEvent, target, activeRemote);
+  const pulled = await handlers.get('pull')(progressEvent, target);
   assert.equal(pulled.ok, true, pulled.errorSummary);
-  assert.equal(await fs.readFile(path.join(target, 'shared.txt'), 'utf8'), 'two\n');
+  assert.equal(await fs.readFile(path.join(target, 'shared.txt'), 'utf8'), 'origin update\n');
 
   await commitFile(target, 'target.txt', 'target\n', 'target update');
-  const pushed = await handlers.get('push')(progressEvent, target, activeRemote);
+  const pushed = await handlers.get('push')(progressEvent, target);
   assert.equal(pushed.ok, true, pushed.errorSummary);
   const targetHead = (await git(target, 'rev-parse', 'HEAD')).stdout.trim();
-  assert.equal((await git(selected, 'rev-parse', 'refs/heads/main')).stdout.trim(), targetHead);
-  assert.notEqual((await git(origin, 'rev-parse', 'refs/heads/main')).stdout.trim(), targetHead);
+  assert.equal((await git(origin, 'rev-parse', 'refs/heads/main')).stdout.trim(), targetHead);
+  assert.equal((await git(selected, 'rev-parse', 'refs/heads/main')).stdout.trim(), selectedHead);
 });
 
 test('Cross Sync compares and integrates related local repositories', async (t) => {

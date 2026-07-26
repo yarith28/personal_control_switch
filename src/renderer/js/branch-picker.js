@@ -32,7 +32,10 @@ export function createBranchPicker({
   let selecting = false;
   let searchInput = null;
   let createButton = null;
+  let remoteToggleButton = null;
   let branchNames = [];
+  let remoteBranchNames = [];
+  let showRemoteBranches = false;
 
   const trigger = document.createElement('button');
   trigger.type = 'button';
@@ -64,6 +67,8 @@ export function createBranchPicker({
     dropdown.scrollTop = 0;
     if (searchInput) {
       searchInput.value = '';
+      showRemoteBranches = false;
+      syncRemoteToggleButton();
       filterOptions('');
       requestAnimationFrame(() => searchInput?.focus({ preventScroll: true }));
     }
@@ -73,7 +78,9 @@ export function createBranchPicker({
     const normalized = query.trim().toLowerCase();
     let visibleCount = 0;
     dropdown.querySelectorAll('.branch-option').forEach((option) => {
-      const visible = !normalized || option.dataset.branchName.includes(normalized);
+      const remoteVisible = option.dataset.remote !== 'true' || showRemoteBranches;
+      const visible = remoteVisible
+        && (!normalized || option.dataset.branchName.includes(normalized));
       option.hidden = !visible;
       if (visible) visibleCount += 1;
     });
@@ -91,6 +98,15 @@ export function createBranchPicker({
       'aria-label',
       alreadyExists ? `Branch ${name} already exists` : `Create branch ${name || 'from entered name'}`
     );
+  }
+
+  function syncRemoteToggleButton() {
+    if (!remoteToggleButton) return;
+    const label = showRemoteBranches ? 'Hide remote branches' : 'Show remote branches';
+    remoteToggleButton.classList.toggle('active', showRemoteBranches);
+    remoteToggleButton.setAttribute('aria-pressed', String(showRemoteBranches));
+    remoteToggleButton.setAttribute('aria-label', label);
+    remoteToggleButton.title = label;
   }
 
   function setSelected(branch) {
@@ -111,13 +127,18 @@ export function createBranchPicker({
     syncCreateButton();
   }
 
-  function setBranches(branches = [], current = null, chosen = null) {
+  function setBranches(branches = [], current = null, chosen = null, remotes = []) {
     dropdown.replaceChildren();
     branchNames = [...branches];
+    remoteBranchNames = [...new Set(remotes)].filter((branch) => (
+      typeof branch === 'string' && branch && !branch.endsWith('/HEAD')
+    ));
     searchInput = null;
     createButton = null;
-    hasBranches = branches.length > 0;
-    if (!branches.length) {
+    remoteToggleButton = null;
+    showRemoteBranches = false;
+    hasBranches = branches.length > 0 || remoteBranchNames.length > 0;
+    if (!hasBranches) {
       trigger.classList.remove('clickable');
       trigger.removeAttribute('title');
       setSelected(null);
@@ -157,6 +178,21 @@ export function createBranchPicker({
       }
     });
     searchWrap.appendChild(searchInput);
+    if (remoteBranchNames.length) {
+      remoteToggleButton = document.createElement('button');
+      remoteToggleButton.type = 'button';
+      remoteToggleButton.className = 'branch-remote-btn';
+      remoteToggleButton.appendChild(iconElement('cloud', { size: 13, strokeWidth: 1.9 }));
+      remoteToggleButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        showRemoteBranches = !showRemoteBranches;
+        syncRemoteToggleButton();
+        filterOptions(searchInput?.value || '');
+        searchInput?.focus({ preventScroll: true });
+      });
+      syncRemoteToggleButton();
+      searchWrap.appendChild(remoteToggleButton);
+    }
     if (onCreate) {
       createButton = document.createElement('button');
       createButton.type = 'button';
@@ -182,26 +218,37 @@ export function createBranchPicker({
     }
     dropdown.appendChild(searchWrap);
 
-    for (const b of branches) {
+    const appendOption = (b, isRemote = false) => {
       const opt = document.createElement('div');
-      opt.className = 'branch-option' + (b === selected ? ' active' : '');
+      opt.className = `branch-option${isRemote ? ' remote' : ''}${b === selected ? ' active' : ''}`;
       opt.setAttribute('role', 'option');
       opt.setAttribute('aria-selected', String(b === selected));
       opt.textContent = b;
       opt.dataset.branchName = b.toLowerCase();
+      opt.dataset.remote = String(isRemote);
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         dropdown.classList.remove('open');
         trigger.setAttribute('aria-expanded', 'false');
         if (b === selected || selecting) return;
         setSelecting(true);
-        Promise.resolve(onSelect?.(b, selected))
+        Promise.resolve(onSelect?.(b, selected, { remote: isRemote }))
           .then((accepted) => {
-            if (accepted !== false) setSelected(b);
+            if (accepted === false) return;
+            if (typeof accepted === 'string') setSelected(accepted);
+            else if (!isRemote) setSelected(b);
           })
           .finally(() => setSelecting(false));
       });
       dropdown.appendChild(opt);
+    };
+    for (const b of branches) appendOption(b);
+    for (const b of remoteBranchNames) appendOption(b, true);
+
+    if (!showRemoteBranches) {
+      dropdown.querySelectorAll('.branch-option.remote').forEach((option) => {
+        option.hidden = true;
+      });
     }
     const empty = document.createElement('div');
     empty.className = 'branch-search-empty';

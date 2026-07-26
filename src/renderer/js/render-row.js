@@ -88,24 +88,55 @@ export function renderRow(project, parentFolder = null) {
     scope: 'git',
     title: 'Switch branch',
     emptyText: '',
-    onSelect: async (branch) => {
+    onSelect: async (branch, _selectedBranch, { remote = false } = {}) => {
       if (row.classList.contains('busy')) return false;
       setRowBusy(project, true);
-      setRowStatus(project, `Switching to ${branch}...`);
-      log(`[${basename(project.path)}] checking out ${branch}...`);
+      setRowStatus(project, remote ? `Creating local branch from ${branch}...` : `Switching to ${branch}...`);
+      log(`[${basename(project.path)}] checking out ${remote ? `remote branch ${branch}` : branch}...`);
       try {
-        const res = await window.api.checkout(project.path, branch);
+        const res = remote
+          ? await window.api.checkoutRemoteBranch(project.path, branch)
+          : await window.api.checkout(project.path, branch);
         if (res.ok) {
           await refreshBranches(project);
-          branchPicker.setBranches(project.branches || [], project.current, project.current);
+          branchPicker.setBranches(
+            project.branches || [],
+            project.current,
+            project.current,
+            project.remoteBranches || []
+          );
           syncBranchUpstreamState();
-          log(`[${basename(project.path)}] switched to ${branch}`, true);
-          return true;
+          log(
+            remote && res.created
+              ? `[${basename(project.path)}] created ${res.branch} tracking ${branch}`
+              : `[${basename(project.path)}] switched to ${res.branch || branch}`,
+            true
+          );
+          return res.branch || true;
         }
 
         logGitFailure(basename(project.path), 'checkout failed', res);
         await refreshBranches(project);
-        branchPicker.setBranches(project.branches || [], project.current, project.current);
+        branchPicker.setBranches(
+          project.branches || [],
+          project.current,
+          project.current,
+          project.remoteBranches || []
+        );
+        return false;
+      } catch (error) {
+        const detail = error?.message || String(error);
+        logGitFailure(basename(project.path), 'checkout failed', {
+          errorSummary: detail,
+          errorRaw: detail,
+        });
+        await refreshBranches(project);
+        branchPicker.setBranches(
+          project.branches || [],
+          project.current,
+          project.current,
+          project.remoteBranches || []
+        );
         return false;
       } finally {
         setRowBusy(project, false);
@@ -129,7 +160,12 @@ export function renderRow(project, parentFolder = null) {
         }
 
         await refreshBranches(project);
-        branchPicker.setBranches(project.branches || [], project.current, project.current);
+        branchPicker.setBranches(
+          project.branches || [],
+          project.current,
+          project.current,
+          project.remoteBranches || []
+        );
         syncBranchUpstreamState();
         log(`[${basename(project.path)}] created and switched to ${branch}`, true);
         showToast('Branch created', branch);
@@ -153,7 +189,12 @@ export function renderRow(project, parentFolder = null) {
         : `Current branch ${project.current || 'unknown'}`
     );
   };
-  branchPicker.setBranches(project.branches || [], project.current, project.current);
+  branchPicker.setBranches(
+    project.branches || [],
+    project.current,
+    project.current,
+    project.remoteBranches || []
+  );
   syncBranchUpstreamState();
   const remoteTag = createRemoteTag(project, {
     disabled: () => state.organizeMode || state.multiSelect || row.classList.contains('busy'),

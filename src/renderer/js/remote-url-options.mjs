@@ -8,27 +8,25 @@ export function normalizeRemoteUrlOptions(value) {
   if (!Array.isArray(value)) return [];
 
   const seenIds = new Set();
-  const seenOptions = new Set();
+  const seenUrls = new Set();
   const options = [];
   for (const entry of value) {
     const id = clean(entry?.id);
     const remoteName = clean(entry?.remoteName);
     const url = clean(entry?.url);
-    const optionKey = `${remoteName}\0${url}`;
     if (
       !REMOTE_ID_PATTERN.test(id)
-      || !remoteName
       || remoteName.length > 255
       || !url
       || url.length > 4096
       || /\p{Cc}/u.test(remoteName)
       || /\p{Cc}/u.test(url)
       || seenIds.has(id)
-      || seenOptions.has(optionKey)
+      || seenUrls.has(url)
     ) continue;
     seenIds.add(id);
-    seenOptions.add(optionKey);
-    options.push({ id, remoteName, url });
+    seenUrls.add(url);
+    options.push(remoteName ? { id, remoteName, url } : { id, url });
   }
   return options;
 }
@@ -41,29 +39,37 @@ export function validateRemoteUrl(value) {
   return { ok: true, url };
 }
 
-export function selectedRemoteUrlOption(project) {
-  const options = normalizeRemoteUrlOptions(project?.remoteUrls);
-  return options.find((option) => option.id === project?.selectedRemoteUrlId) || null;
-}
-
-export function selectedGitRemoteTarget(project) {
-  const option = selectedRemoteUrlOption(project);
-  return option ? { type: 'git-remote', name: option.remoteName } : null;
+export function selectRemoteName(selectedValue, remotes, fallbacks = []) {
+  const names = (Array.isArray(remotes) ? remotes : [])
+    .map((remote) => clean(remote?.name))
+    .filter(Boolean);
+  const selected = clean(selectedValue);
+  if (names.includes(selected)) return selected;
+  for (const fallback of Array.isArray(fallbacks) ? fallbacks : []) {
+    const name = clean(fallback);
+    if (names.includes(name)) return name;
+  }
+  if (names.includes('origin')) return 'origin';
+  return names[0] || '';
 }
 
 export function mergeConfiguredRemoteUrls(optionsValue, remotes, makeId) {
   const options = normalizeRemoteUrlOptions(optionsValue);
-  let changed = false;
+  let changed = JSON.stringify(options) !== JSON.stringify(
+    Array.isArray(optionsValue) ? optionsValue : []
+  );
   for (const remote of Array.isArray(remotes) ? remotes : []) {
     const remoteName = clean(remote?.name);
-    const url = clean(remote?.url);
-    if (!remoteName || !url) continue;
-    const exists = options.some((option) => (
-      option.remoteName === remoteName && option.url === url
-    ));
-    if (exists) continue;
-    options.push({ id: makeId(options), remoteName, url });
-    changed = true;
+    const values = [
+      ...(Array.isArray(remote?.urls) ? remote.urls : [remote?.url]),
+      ...(Array.isArray(remote?.pushUrls) ? remote.pushUrls : [remote?.pushUrl]),
+    ];
+    for (const value of values) {
+      const url = clean(value);
+      if (!remoteName || !url || options.some((option) => option.url === url)) continue;
+      options.push({ id: makeId(options), remoteName, url });
+      changed = true;
+    }
   }
   return { options, changed };
 }

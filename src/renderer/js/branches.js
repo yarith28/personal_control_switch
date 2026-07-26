@@ -3,45 +3,70 @@ import { renderProjects } from './render-list.js';
 import { persist } from './persist.js';
 import { log } from './log.js';
 import {
-  selectedGitRemoteTarget,
-  selectedRemoteUrlOption,
+  mergeConfiguredRemoteUrls,
+  normalizeRemoteUrlOptions,
+  selectRemoteName,
 } from './remote-url-options.mjs';
+import { normalizeAppRemotes } from './app-remotes.mjs';
 
-function reconcileConfiguredRemote(project, result) {
-  const selectedRemote = selectedRemoteUrlOption(project);
-  if (
-    !result.configuredRemote
-    || (
-      selectedRemote?.remoteName === result.configuredRemote
-      && (
-        !result.configuredRemoteUrl
-        || selectedRemote?.url === result.configuredRemoteUrl
-      )
-    )
-  ) return false;
+function makeRemoteId(options) {
+  const existing = new Set(options.map((option) => option.id));
+  let id;
+  do {
+    const random = globalThis.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 12)
+      || Math.random().toString(36).slice(2, 14);
+    id = `remote_${Date.now().toString(36)}_${random}`;
+  } while (existing.has(id));
+  return id;
+}
 
-  const configuredOption = (project.remoteUrls || []).find((option) => (
-    option.remoteName === result.configuredRemote
-    && option.url === result.configuredRemoteUrl
-  )) || (project.remoteUrls || []).find((option) => (
-    option.remoteName === result.configuredRemote
-  ));
-  if (!configuredOption || configuredOption.id === project.selectedRemoteUrlId) return false;
-  project.selectedRemoteUrlId = configuredOption.id;
-  return true;
+function reconcileRemoteHistory(project, result) {
+  const gitRemotes = Array.isArray(result.gitRemotes) ? result.gitRemotes : [];
+  let options = normalizeRemoteUrlOptions(project.remoteUrls);
+  let changed = JSON.stringify(options) !== JSON.stringify(project.remoteUrls || []);
+  const selectedRemoteName = selectRemoteName(
+    project.selectedRemoteName,
+    gitRemotes,
+    [result.configuredRemote, result.defaultRemote]
+  );
+
+  const legacyRemotes = normalizeAppRemotes(project.appRemotes);
+  for (const legacy of legacyRemotes) {
+    if (options.some((option) => option.url === legacy.url)) continue;
+    options.push({
+      id: makeRemoteId(options),
+      ...(selectedRemoteName ? { remoteName: selectedRemoteName } : {}),
+      url: legacy.url,
+    });
+    changed = true;
+  }
+  if (legacyRemotes.length || (project.appRemotes || []).length) {
+    project.appRemotes = [];
+    changed = true;
+  }
+
+  const merged = mergeConfiguredRemoteUrls(options, gitRemotes, makeRemoteId);
+  project.remoteUrls = merged.options;
+  project.gitRemotes = gitRemotes;
+  project.gitRemoteNames = gitRemotes.map((remote) => remote.name);
+  if (project.selectedRemoteName !== selectedRemoteName) changed = true;
+  project.selectedRemoteName = selectedRemoteName;
+  if ('selectedRemoteUrlId' in project) {
+    delete project.selectedRemoteUrlId;
+    changed = true;
+  }
+  return changed || merged.changed;
 }
 
 export async function refreshBranches(project) {
-  let res = await window.api.getBranches(project.path, selectedGitRemoteTarget(project));
-  if (res.ok && reconcileConfiguredRemote(project, res)) {
-    res = await window.api.getBranches(project.path, selectedGitRemoteTarget(project));
-  }
+  const res = await window.api.getBranches(project.path);
   if (res.ok) {
+    reconcileRemoteHistory(project, res);
     project.branches    = res.branches;
+    project.remoteBranches = res.remoteBranches || [];
     project.current     = res.current;
     project.hasUpstream = res.hasUpstream;
     project.upstream    = res.upstream || null;
-    project.activeRemote = res.activeRemote || null;
     project.configuredRemote = res.configuredRemote || null;
     project.defaultRemote = res.defaultRemote || null;
     project.ahead       = res.ahead;
@@ -51,9 +76,12 @@ export async function refreshBranches(project) {
     project.missing     = false;
   } else {
     project.branches = null;
+    project.remoteBranches = [];
     project.current = null;
     project.hasUpstream = null;
     project.upstream = null;
+    project.gitRemotes = [];
+    project.gitRemoteNames = [];
     project.configuredRemote = null;
     project.defaultRemote = null;
     project.uncommitted = 0;

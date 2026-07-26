@@ -131,36 +131,26 @@ async function listGitRemotes(repoPath) {
     .filter(Boolean);
   const remotes = await Promise.all(names.map(async (name) => {
     const [fetchResult, pushResult, explicitPushResult] = await Promise.all([
-      runGit(['remote', 'get-url', name], repoPath),
-      runGit(['remote', 'get-url', '--push', name], repoPath),
+      runGit(['remote', 'get-url', '--all', name], repoPath),
+      runGit(['remote', 'get-url', '--push', '--all', name], repoPath),
       runGit(['config', '--get-all', `remote.${name}.pushurl`], repoPath),
     ]);
+    const urls = fetchResult.ok
+      ? fetchResult.stdout.split(/\r?\n/).map((url) => url.trim()).filter(Boolean)
+      : [];
+    const pushUrls = pushResult.ok
+      ? pushResult.stdout.split(/\r?\n/).map((url) => url.trim()).filter(Boolean)
+      : [];
     return {
       name,
-      url: fetchResult.ok ? fetchResult.stdout.trim() : '',
-      pushUrl: pushResult.ok ? pushResult.stdout.trim() : '',
+      url: urls[0] || '',
+      urls,
+      pushUrl: pushUrls[0] || '',
+      pushUrls,
       hasExplicitPushUrl: explicitPushResult.ok,
     };
   }));
   return { ok: true, remotes };
-}
-
-async function resolveGitRemoteTarget(value, repoPath) {
-  if (value?.type !== 'git-remote') return { ok: true, remote: null };
-  const nameResult = validateGitRemoteName(value.name);
-  if (!nameResult.ok) return nameResult;
-  const remotesResult = await listGitRemotes(repoPath);
-  if (!remotesResult.ok) return remotesResult;
-  const remote = remotesResult.remotes.find((entry) => entry.name === nameResult.name);
-  if (!remote) {
-    return {
-      ok: false,
-      errorCode: 'GIT_REMOTE_NOT_FOUND',
-      errorSummary: `Remote ${nameResult.name} no longer exists.`,
-      errorRaw: '',
-    };
-  }
-  return { ok: true, remote };
 }
 
 function sendGitProgress(event, repoPath, payload) {
@@ -486,16 +476,17 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   );
   if (!branches.ok) return { ok: false, error: branches.stderr };
 
+  const remoteBranches = await runGit(
+    ['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes'],
+    repoPath
+  );
+
   const current = await runGit(['branch', '--show-current'], repoPath);
   const upstream = await runGit(
     ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
     repoPath
   );
-  const gitRemoteResult = await resolveGitRemoteTarget(appRemoteValue, repoPath);
-  if (!gitRemoteResult.ok) return gitRemoteResult;
-  const appRemoteResult = gitRemoteResult.remote
-    ? { ok: true, remote: null }
-    : resolveAppRemote(appRemoteValue);
+  const appRemoteResult = resolveAppRemote(appRemoteValue);
   if (!appRemoteResult.ok) return appRemoteResult;
   const appRemote = appRemoteResult.remote;
   const currentName = current.stdout.trim();
@@ -505,25 +496,22 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   const configuredRemoteName = configuredRemoteResult?.ok
     ? configuredRemoteResult.stdout.trim()
     : null;
-  const remoteNamesResult = await runGit(['remote'], repoPath);
-  const remoteNames = remoteNamesResult.ok
-    ? remoteNamesResult.stdout.split(/\r?\n/).map((name) => name.trim()).filter(Boolean)
-    : [];
+  const gitRemotesResult = await listGitRemotes(repoPath);
+  const gitRemotes = gitRemotesResult.ok ? gitRemotesResult.remotes : [];
+  const remoteNames = gitRemotes.map((remote) => remote.name);
   const configuredRemote = remoteNames.includes(configuredRemoteName)
     ? configuredRemoteName
     : null;
   const defaultRemote = configuredRemote
     || (remoteNames.includes('origin') ? 'origin' : null)
     || (remoteNames.length === 1 ? remoteNames[0] : null);
-  const configuredRemoteUrlResult = configuredRemote
-    ? await runGit(['remote', 'get-url', configuredRemote], repoPath)
+  const configuredRemoteUrl = configuredRemote
+    ? gitRemotes.find((remote) => remote.name === configuredRemote)?.url || null
     : null;
-  const comparisonRef = gitRemoteResult.remote && currentName
-    ? `refs/remotes/${gitRemoteResult.remote.name}/${currentName}`
-    : appRemote && currentName
-      ? appRemoteRef(appRemote.id, currentName)
-      : '@{u}';
-  const comparisonExists = gitRemoteResult.remote || appRemote
+  const comparisonRef = appRemote && currentName
+    ? appRemoteRef(appRemote.id, currentName)
+    : '@{u}';
+  const comparisonExists = appRemote
     ? await runGit(['rev-parse', '--verify', comparisonRef], repoPath)
     : upstream;
   const ahead = comparisonExists.ok
@@ -540,16 +528,21 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   return {
     ok: true,
     branches: branches.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
+    remoteBranches: remoteBranches.ok
+      ? remoteBranches.stdout
+          .split('\n')
+          .map((line) => line.split('\t'))
+          .filter(([name, symref]) => name?.trim() && !symref?.trim())
+          .map(([name]) => name.trim())
+      : [],
+    gitRemotes,
     current:  currentName,
     hasUpstream: upstream.ok,
     upstream: upstream.ok ? upstream.stdout.trim() : null,
-    hasRemoteBranch: gitRemoteResult.remote || appRemote ? comparisonExists.ok : null,
-    activeRemote: gitRemoteResult.remote?.name || null,
+    hasRemoteBranch: appRemote ? comparisonExists.ok : null,
     configuredRemote,
     defaultRemote,
-    configuredRemoteUrl: configuredRemoteUrlResult?.ok
-      ? configuredRemoteUrlResult.stdout.trim()
-      : null,
+    configuredRemoteUrl,
     ahead:    ahead?.ok  ? (parseInt(ahead.stdout.trim())  || 0) : null,
     behind:   behind?.ok ? (parseInt(behind.stdout.trim()) || 0) : null,
     uncommitted,
@@ -557,19 +550,6 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
 });
 
 ipcMain.handle('fetch', async (event, repoPath, appRemoteValue = null) => {
-  const gitRemoteResult = await resolveGitRemoteTarget(appRemoteValue, repoPath);
-  if (!gitRemoteResult.ok) return gitRemoteResult;
-  if (gitRemoteResult.remote) {
-    const branchResult = await currentBranch(repoPath);
-    if (!branchResult.ok) return branchResult;
-    return await fetchGitRemoteBranch(
-      event,
-      repoPath,
-      gitRemoteResult.remote.name,
-      branchResult.branch,
-      MANUAL_FETCH_TIMEOUT_MS
-    );
-  }
   const appRemoteResult = resolveAppRemote(appRemoteValue);
   if (!appRemoteResult.ok) return appRemoteResult;
   if (appRemoteResult.remote) {
@@ -595,77 +575,7 @@ ipcMain.handle('fetch', async (event, repoPath, appRemoteValue = null) => {
 });
 
 ipcMain.handle('get-git-remotes', async (_, repoPath) => {
-  const result = await listGitRemotes(repoPath);
-  if (!result.ok) return result;
-
-  const branchResult = await currentBranch(repoPath);
-  if (!branchResult.ok) {
-    return {
-      ...result,
-      currentBranch: null,
-      activeRemote: null,
-    };
-  }
-
-  const configuredRemote = await runGit(
-    ['config', '--get', `branch.${branchResult.branch}.remote`],
-    repoPath
-  );
-  const activeRemote = configuredRemote.ok
-    && result.remotes.some((remote) => remote.name === configuredRemote.stdout.trim())
-    ? configuredRemote.stdout.trim()
-    : null;
-  return {
-    ...result,
-    currentBranch: branchResult.branch,
-    activeRemote,
-  };
-});
-
-ipcMain.handle('add-git-remote', async (_, repoPath, remoteNameValue, urlValue) => {
-  const remoteName = validateGitRemoteName(remoteNameValue);
-  if (!remoteName.ok) return remoteName;
-  const remoteUrl = validateRemoteUrl(urlValue);
-  if (!remoteUrl.ok) return remoteUrl;
-
-  const remotesResult = await listGitRemotes(repoPath);
-  if (!remotesResult.ok) return remotesResult;
-  if (remotesResult.remotes.some((remote) => remote.name === remoteName.name)) {
-    return {
-      ok: false,
-      errorCode: 'GIT_REMOTE_EXISTS',
-      errorSummary: `Remote ${remoteName.name} already exists.`,
-      errorRaw: '',
-    };
-  }
-
-  const added = await runGit(
-    ['remote', 'add', remoteName.name, remoteUrl.url],
-    repoPath
-  );
-  if (!added.ok) {
-    added.errorSummary = /valid remote name/i.test(added.errorRaw || '')
-      ? 'Enter a valid Git remote name.'
-      : `Could not add remote ${remoteName.name}.`;
-    return added;
-  }
-
-  const refreshed = await listGitRemotes(repoPath);
-  const remote = refreshed.ok
-    ? refreshed.remotes.find((entry) => entry.name === remoteName.name)
-    : null;
-  if (!remote || remote.url !== remoteUrl.url) {
-    const rollback = await runGit(['remote', 'remove', remoteName.name], repoPath);
-    return {
-      ok: false,
-      errorCode: 'REMOTE_ADD_VERIFY_FAILED',
-      errorSummary: rollback.ok
-        ? `Git did not retain remote ${remoteName.name}. The incomplete remote was removed.`
-        : `Git did not retain remote ${remoteName.name}, and the incomplete remote could not be removed.`,
-      errorRaw: refreshed.errorRaw || rollback.errorRaw || '',
-    };
-  }
-  return { ok: true, remote };
+  return await listGitRemotes(repoPath);
 });
 
 ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlValue) => {
@@ -689,10 +599,6 @@ ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlVal
     return { ok: true, unchanged: true, remote: existing };
   }
 
-  const updateMatchingPushUrl = (
-    existing.hasExplicitPushUrl
-    && existing.pushUrl === existing.url
-  );
   const updated = await runGit(
     ['remote', 'set-url', remoteName.name, remoteUrl.url],
     repoPath
@@ -701,43 +607,23 @@ ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlVal
     updated.errorSummary = `Could not update ${remoteName.name}.`;
     return updated;
   }
-  if (updateMatchingPushUrl) {
-    const pushUpdated = await runGit(
-      ['remote', 'set-url', '--push', remoteName.name, remoteUrl.url],
-      repoPath
-    );
-    if (!pushUpdated.ok) {
-      await runGit(['remote', 'set-url', remoteName.name, existing.url], repoPath);
-      pushUpdated.errorSummary = `Could not update the push URL for ${remoteName.name}. The previous URL was restored.`;
-      return pushUpdated;
-    }
-  }
-
   const refreshed = await listGitRemotes(repoPath);
   const remote = refreshed.ok
     ? refreshed.remotes.find((entry) => entry.name === remoteName.name)
     : null;
-  const verified = (
-    remote?.url === remoteUrl.url
-    && (!updateMatchingPushUrl || remote.pushUrl === remoteUrl.url)
-  );
+  const verified = remote?.url === remoteUrl.url;
   if (!verified) {
-    const rollbackResults = await Promise.all([
-      runGit(['remote', 'set-url', remoteName.name, existing.url], repoPath),
-      ...(updateMatchingPushUrl
-        ? [runGit(['remote', 'set-url', '--push', remoteName.name, existing.pushUrl], repoPath)]
-        : []),
-    ]);
-    const rollbackOk = rollbackResults.every((result) => result.ok);
+    const rollback = await runGit(
+      ['remote', 'set-url', remoteName.name, existing.url],
+      repoPath
+    );
     return {
       ok: false,
       errorCode: 'REMOTE_URL_VERIFY_FAILED',
-      errorSummary: rollbackOk
+      errorSummary: rollback.ok
         ? `Git did not retain the new URL for ${remoteName.name}. The previous URL was restored.`
         : `Git did not retain the new URL for ${remoteName.name}, and the previous URL could not be restored.`,
-      errorRaw: refreshed.errorRaw
-        || rollbackResults.find((result) => !result.ok)?.errorRaw
-        || '',
+      errorRaw: refreshed.errorRaw || rollback.errorRaw || '',
     };
   }
 
@@ -745,80 +631,6 @@ ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlVal
     ok: true,
     remote,
     previousUrl: existing.url,
-  };
-});
-
-ipcMain.handle('set-active-git-remote', async (_, repoPath, remoteNameValue) => {
-  const remoteName = validateGitRemoteName(remoteNameValue);
-  if (!remoteName.ok) return remoteName;
-
-  const remoteResult = await resolveGitRemoteTarget(
-    { type: 'git-remote', name: remoteName.name },
-    repoPath
-  );
-  if (!remoteResult.ok) return remoteResult;
-
-  const branchResult = await currentBranch(repoPath);
-  if (!branchResult.ok) return branchResult;
-
-  const branch = branchResult.branch;
-  const remoteKey = `branch.${branch}.remote`;
-  const mergeKey = `branch.${branch}.merge`;
-  const [previousRemoteResult, previousMergeResult] = await Promise.all([
-    runGit(['config', '--get', remoteKey], repoPath),
-    runGit(['config', '--get', mergeKey], repoPath),
-  ]);
-  const previousRemote = previousRemoteResult.ok
-    ? previousRemoteResult.stdout.trim()
-    : null;
-  const previousMerge = previousMergeResult.ok
-    ? previousMergeResult.stdout.trim()
-    : null;
-  const mergeRef = previousMerge || `refs/heads/${branch}`;
-
-  if (previousRemote === remoteName.name && previousMerge) {
-    return {
-      ok: true,
-      unchanged: true,
-      branch,
-      activeRemote: remoteName.name,
-      previousRemote,
-      upstream: `${remoteName.name}/${mergeRef.replace(/^refs\/heads\//, '')}`,
-    };
-  }
-
-  const setRemote = await runGit(
-    ['config', '--local', remoteKey, remoteName.name],
-    repoPath
-  );
-  if (!setRemote.ok) {
-    setRemote.errorSummary = `Could not make ${remoteName.name} active for ${branch}.`;
-    return setRemote;
-  }
-
-  if (!previousMerge) {
-    const setMerge = await runGit(
-      ['config', '--local', mergeKey, mergeRef],
-      repoPath
-    );
-    if (!setMerge.ok) {
-      if (previousRemote) {
-        await runGit(['config', '--local', remoteKey, previousRemote], repoPath);
-      } else {
-        await runGit(['config', '--local', '--unset-all', remoteKey], repoPath);
-      }
-      setMerge.errorSummary = `Could not make ${remoteName.name} active for ${branch}. The previous branch configuration was restored.`;
-      return setMerge;
-    }
-  }
-
-  return {
-    ok: true,
-    unchanged: false,
-    branch,
-    activeRemote: remoteName.name,
-    previousRemote,
-    upstream: `${remoteName.name}/${mergeRef.replace(/^refs\/heads\//, '')}`,
   };
 });
 
@@ -885,6 +697,105 @@ ipcMain.handle('checkout', async (_, repoPath, branch) => {
   return await runGit(['checkout', branch], repoPath);
 });
 
+ipcMain.handle('checkout-remote-branch', async (_, repoPath, remoteBranchValue) => {
+  const remoteBranch = typeof remoteBranchValue === 'string'
+    ? remoteBranchValue.trim()
+    : '';
+  if (!remoteBranch || remoteBranch.length > 1024 || /[\u0000-\u001f\u007f]/.test(remoteBranch)) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_REMOTE_BRANCH',
+      errorSummary: 'The remote branch name is invalid.',
+      errorRaw: '',
+    };
+  }
+
+  const remotesResult = await listGitRemotes(repoPath);
+  if (!remotesResult.ok) return remotesResult;
+  const remote = remotesResult.remotes
+    .slice()
+    .sort((a, b) => b.name.length - a.name.length)
+    .find((entry) => remoteBranch.startsWith(`${entry.name}/`));
+  const localBranch = remote ? remoteBranch.slice(remote.name.length + 1) : '';
+  if (!remote || !localBranch || localBranch === 'HEAD') {
+    return {
+      ok: false,
+      errorCode: 'REMOTE_BRANCH_NOT_FOUND',
+      errorSummary: `Remote branch ${remoteBranch || '(empty)'} no longer exists.`,
+      errorRaw: '',
+    };
+  }
+
+  const validLocalName = await runGit(['check-ref-format', '--branch', localBranch], repoPath);
+  if (!validLocalName.ok) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_REMOTE_BRANCH',
+      errorSummary: 'The remote branch name is invalid.',
+      errorRaw: validLocalName.errorRaw,
+    };
+  }
+
+  const remoteRef = `refs/remotes/${remoteBranch}`;
+  const exists = await runGit(['show-ref', '--verify', remoteRef], repoPath);
+  if (!exists.ok) {
+    return {
+      ok: false,
+      errorCode: 'REMOTE_BRANCH_NOT_FOUND',
+      errorSummary: `Remote branch ${remoteBranch} no longer exists.`,
+      errorRaw: exists.errorRaw,
+    };
+  }
+
+  const localExists = await runGit(
+    ['show-ref', '--verify', `refs/heads/${localBranch}`],
+    repoPath
+  );
+  let created = false;
+  if (!localExists.ok) {
+    const createResult = await runGit(
+      ['branch', '--track', localBranch, remoteBranch],
+      repoPath
+    );
+    if (!createResult.ok) {
+      const createdDespiteError = await runGit(
+        ['show-ref', '--verify', `refs/heads/${localBranch}`],
+        repoPath
+      );
+      if (!createdDespiteError.ok) {
+        createResult.errorSummary = `Could not create ${localBranch} from ${remoteBranch}.`;
+        return createResult;
+      }
+    } else {
+      created = true;
+    }
+  }
+
+  const checkedOut = await runGit(['checkout', localBranch], repoPath);
+  if (!checkedOut.ok) {
+    checkedOut.errorSummary = created
+      ? `${localBranch} was created, but Git could not check it out.`
+      : `Could not switch to ${localBranch}.`;
+    return checkedOut;
+  }
+
+  const currentResult = await currentBranch(repoPath);
+  if (!currentResult.ok || currentResult.branch !== localBranch) {
+    return {
+      ok: false,
+      errorCode: 'CHECKOUT_VERIFY_FAILED',
+      errorSummary: `Git did not switch to ${localBranch}.`,
+      errorRaw: currentResult.errorRaw || '',
+    };
+  }
+  return {
+    ...checkedOut,
+    branch: localBranch,
+    remoteBranch,
+    created,
+  };
+});
+
 ipcMain.handle('create-branch', async (_, repoPath, branch) => {
   const name = typeof branch === 'string' ? branch.trim() : '';
   if (!name) {
@@ -911,17 +822,6 @@ ipcMain.handle('create-branch', async (_, repoPath, branch) => {
 });
 
 ipcMain.handle('pull', async (event, repoPath, appRemoteValue = null) => {
-  const gitRemoteResult = await resolveGitRemoteTarget(appRemoteValue, repoPath);
-  if (!gitRemoteResult.ok) return gitRemoteResult;
-  if (gitRemoteResult.remote) {
-    const branchResult = await currentBranch(repoPath);
-    if (!branchResult.ok) return branchResult;
-    return await runGitStreaming(
-      ['pull', gitRemoteResult.remote.name, branchResult.branch],
-      repoPath,
-      (payload) => sendGitProgress(event, repoPath, payload)
-    );
-  }
   const appRemoteResult = resolveAppRemote(appRemoteValue);
   if (!appRemoteResult.ok) return appRemoteResult;
   if (appRemoteResult.remote) {
@@ -961,18 +861,6 @@ ipcMain.handle('pull', async (event, repoPath, appRemoteValue = null) => {
 });
 
 ipcMain.handle('push', async (event, repoPath, appRemoteValue = null) => {
-  const gitRemoteResult = await resolveGitRemoteTarget(appRemoteValue, repoPath);
-  if (!gitRemoteResult.ok) return gitRemoteResult;
-  if (gitRemoteResult.remote) {
-    const branchResult = await currentBranch(repoPath);
-    if (!branchResult.ok) return branchResult;
-    const branchRef = `refs/heads/${branchResult.branch}`;
-    return await runGitStreaming(
-      ['push', gitRemoteResult.remote.name, `${branchRef}:${branchRef}`],
-      repoPath,
-      (payload) => sendGitProgress(event, repoPath, payload)
-    );
-  }
   const appRemoteResult = resolveAppRemote(appRemoteValue);
   if (!appRemoteResult.ok) return appRemoteResult;
   if (appRemoteResult.remote) {

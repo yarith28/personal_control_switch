@@ -23,10 +23,7 @@ import { hydrateStaticIcons } from './js/icons.js';
 import { basename, withButtonLoading } from './js/util.js';
 import { showToast } from './js/notify.js';
 import { normalizeAppRemotes } from './js/app-remotes.mjs';
-import {
-  normalizeRemoteUrlOptions,
-  selectedGitRemoteTarget,
-} from './js/remote-url-options.mjs';
+import { normalizeRemoteUrlOptions } from './js/remote-url-options.mjs';
 import { confirmDialog } from './js/modal.js';
 
 let autoRefreshInitialized = false;
@@ -82,17 +79,13 @@ fetchAllBtn.addEventListener('click', () =>
   withButtonLoading(fetchAllBtn, fetchAllProjects)
 );
 pullSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (path, project) => (
-    window.api.pull(path, selectedGitRemoteTarget(project))
-  )))
+  withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (path) => window.api.pull(path)))
 );
 pushSelectedBtn.addEventListener('click', () =>
   withButtonLoading(pushSelectedBtn, () => batchOp('Pushing', pushWithUpstreamPrompt))
 );
 fetchSelectedBtn.addEventListener('click', () =>
-  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (path, project) => (
-    window.api.fetch(path, selectedGitRemoteTarget(project))
-  )))
+  withButtonLoading(fetchSelectedBtn, () => batchOp('Fetching', (path) => window.api.fetch(path)))
 );
 selectAll.addEventListener('change', () => {
   const checked = selectAll.checked;
@@ -372,12 +365,24 @@ projectSearchInput?.addEventListener('keydown', (event) => {
 
   const hydrateProject = (p) => {
     const appRemotes = normalizeAppRemotes(p.appRemotes);
+    const remoteUrls = normalizeRemoteUrlOptions(p.remoteUrls);
+    const legacySelected = Array.isArray(p.remoteUrls)
+      ? p.remoteUrls.find((option) => option?.id === p.selectedRemoteUrlId)
+      : null;
+    const storedRemoteName = typeof p.selectedRemoteName === 'string'
+      ? p.selectedRemoteName.trim()
+      : '';
+    const selectedRemoteName = storedRemoteName
+      || (typeof legacySelected?.remoteName === 'string'
+        ? legacySelected.remoteName.trim()
+        : '');
     return {
       type: 'project',
       path: p.path,
       pinned: !!p.pinned,
       selected: false,
       branches: p.branches || null,
+      remoteBranches: [],
       current:  p.current  || null,
       hasUpstream: typeof p.hasUpstream === 'boolean'
         ? p.hasUpstream
@@ -387,14 +392,11 @@ projectSearchInput?.addEventListener('keydown', (event) => {
       behind:   typeof p.behind === 'number' ? p.behind : null,
       uncommitted: typeof p.uncommitted === 'number' ? p.uncommitted : 0,
       appRemotes,
-      remoteUrls: normalizeRemoteUrlOptions(p.remoteUrls),
+      remoteUrls,
+      gitRemotes: [],
+      gitRemoteNames: [],
       selectedRemoteId: null,
-      selectedRemoteUrlId: typeof p.selectedRemoteUrlId === 'string'
-        ? p.selectedRemoteUrlId.trim()
-        : '',
-      selectedRemoteName: typeof p.selectedRemoteName === 'string'
-        ? p.selectedRemoteName.trim()
-        : '',
+      selectedRemoteName,
       error:    null,
     };
   };

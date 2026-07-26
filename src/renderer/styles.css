@@ -2024,6 +2024,9 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
   transform: translateY(0) scale(1);
   pointer-events: all;
 }
+.branch-dropdown[data-picker-scope='git'] {
+  width: min(340px, calc(100vw - 16px));
+}
 
 .branch-search {
   position: sticky;
@@ -2053,6 +2056,7 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
   font-size: 12px;
 }
 .branch-search-input::placeholder { color: var(--text-faint); }
+.branch-remote-btn,
 .branch-create-btn {
   width: 25px;
   height: 25px;
@@ -2068,11 +2072,19 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
+.branch-remote-btn { color: var(--text-muted); }
+.branch-remote-btn:hover,
+.branch-remote-btn.active {
+  color: var(--branch-color);
+  background: var(--branch-bg);
+  border-color: color-mix(in srgb, var(--branch-color) 24%, transparent);
+}
 .branch-create-btn:hover:not(:disabled) {
   background: var(--branch-bg);
   border-color: color-mix(in srgb, var(--branch-color) 24%, transparent);
 }
 .branch-create-btn:disabled { cursor: not-allowed; opacity: 0.3; }
+.branch-remote-btn svg,
 .branch-create-btn svg { display: block; overflow: hidden; }
 .branch-search-empty {
   padding: 10px 12px;
@@ -2095,6 +2107,21 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
 }
 .branch-option:hover { background: var(--glass-bg-hover); }
 .branch-option.active { background: var(--branch-bg); color: var(--branch-color); }
+.branch-option.remote { color: var(--text-muted); }
+.branch-option.remote::before {
+  content: 'remote';
+  display: inline-block;
+  margin-right: 7px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--glass-bg);
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
 
 .project-row .btn-row { display: flex; gap: 6px; }
 .project-row .btn-pull,
@@ -2670,8 +2697,8 @@ body.helper-open .projects { overflow: hidden; }
 /* Remote manager follows the same glass modal language as the app dialogs. */
 .remote-manager-overlay { z-index: 9000; }
 .remote-manager-card {
-  width: min(620px, calc(100vw - 36px));
-  max-width: 620px;
+  width: min(660px, calc(100vw - 36px));
+  max-width: 660px;
   max-height: min(860px, calc(100vh - 28px));
   padding: 20px;
   display: flex;
@@ -2685,11 +2712,6 @@ body.helper-open .projects { overflow: hidden; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-}
-.remote-manager-header-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
 }
 .remote-manager-eyebrow {
   margin-bottom: 3px;
@@ -2706,9 +2728,7 @@ body.helper-open .projects { overflow: hidden; }
   font-size: 11px;
   line-height: 1.45;
 }
-.remote-manager-add,
 .remote-manager-close,
-.remote-add-dialog-close,
 .remote-row-action {
   width: 28px;
   height: 28px;
@@ -2724,12 +2744,52 @@ body.helper-open .projects { overflow: hidden; }
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
-.remote-manager-add { color: var(--remote-color); }
-.remote-manager-add:disabled { opacity: 0.4; cursor: not-allowed; }
-.remote-manager-add:hover:not(:disabled),
 .remote-manager-close:hover,
-.remote-add-dialog-close:hover,
 .remote-row-action:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
+.remote-target-panel {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+  align-items: end;
+  gap: 10px 14px;
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 11px;
+  background: var(--glass-bg);
+}
+.remote-target-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+.remote-target-select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 28px 7px 9px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--dropdown-bg);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+.remote-target-select:focus {
+  border-color: var(--remote-color);
+  box-shadow: 0 0 0 3px var(--remote-bg);
+}
+.remote-target-current {
+  min-width: 0;
+  padding-bottom: 8px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .remote-manager-list {
   flex: 0 1 auto;
   min-height: 0;
@@ -2761,15 +2821,7 @@ body.helper-open .projects { overflow: hidden; }
   font-size: 13px;
   font-weight: 750;
 }
-.remote-push-url-note {
-  overflow: hidden;
-  color: #b45309;
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 9.5px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.remote-history-count { color: var(--text-faint); font-size: 10px; }
 .remote-url-list {
   min-width: 0;
   display: flex;
@@ -2789,6 +2841,7 @@ body.helper-open .projects { overflow: hidden; }
   cursor: pointer;
 }
 .remote-url-row:hover { background: var(--glass-bg); }
+.remote-url-row.disabled { cursor: default; }
 .remote-url-row.active {
   border-color: color-mix(in srgb, var(--remote-color) 38%, var(--glass-border));
   background: var(--remote-bg);
@@ -2851,8 +2904,9 @@ body.helper-open .projects { overflow: hidden; }
 .remote-add-url:hover { color: var(--text-primary); }
 .remote-url-form {
   min-width: 0;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 7px;
 }
 .remote-url-form[hidden] { display: none; }
@@ -2873,11 +2927,22 @@ body.helper-open .projects { overflow: hidden; }
   box-shadow: 0 0 0 3px var(--remote-bg);
 }
 .remote-url-form-actions {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   gap: 6px;
   flex-shrink: 0;
 }
 .remote-url-form-actions .btn { padding: 6px 10px; font-size: 10px; }
+.remote-url-form-status {
+  grid-column: 1 / -1;
+  min-height: 14px;
+  color: var(--text-faint);
+  font-size: 9.5px;
+}
+.remote-url-form-status:empty { display: none; }
+.remote-url-form-status.error { color: #dc2626; }
+.remote-url-form-status.success { color: var(--remote-color); }
 .remote-manager-empty {
   padding: 10px;
   color: var(--text-faint);
@@ -2895,71 +2960,18 @@ body.helper-open .projects { overflow: hidden; }
 .remote-manager-status.success { color: var(--remote-color); }
 .remote-manager-footer .btn { padding: 6px 13px; font-size: 11px; }
 .remote-form-cancel,
-.remote-form-test { background: var(--glass-bg); color: var(--text-muted); }
+.remote-form-test,
+.remote-form-save-only { background: var(--glass-bg); color: var(--text-muted); }
 .remote-form-save,
 .remote-manager-footer .modal-confirm { background: color-mix(in srgb, var(--remote-color) 76%, transparent); color: white; }
 .remote-manager-footer { padding-top: 0; }
 .remote-manager-footer { flex-shrink: 0; }
 
-.remote-add-dialog-overlay { z-index: 10000; }
-.remote-add-dialog-card {
-  width: min(440px, calc(100vw - 36px));
-  min-width: 0;
-  max-width: 440px;
-}
-.remote-add-dialog-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 18px;
-}
-.remote-add-dialog-intro {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-.remote-add-dialog-form {
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-}
-.remote-add-dialog-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-}
-.remote-add-dialog-field input {
-  width: 100%;
-  min-width: 0;
-  padding: 9px 11px;
-  border: 1px solid var(--glass-border);
-  border-radius: 9px;
-  outline: none;
-  background: var(--dropdown-bg);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 400;
-}
-.remote-add-dialog-field input:focus {
-  border-color: var(--remote-color);
-  box-shadow: 0 0 0 3px var(--remote-bg);
-}
-.remote-add-dialog-status {
-  min-height: 16px;
-  color: var(--text-faint);
-  font-size: 10px;
-}
-.remote-add-dialog-status.error { color: #dc2626; }
-.remote-add-dialog-status.success { color: var(--remote-color); }
-.remote-add-dialog-actions .btn { padding: 7px 12px; font-size: 10px; }
-
 @media (max-width: 600px) {
-  .remote-url-form { align-items: stretch; flex-direction: column; }
+  .remote-target-panel { grid-template-columns: 1fr; }
+  .remote-target-current { padding-bottom: 0; }
+  .remote-url-form { grid-template-columns: 1fr; }
+  .remote-url-form-actions { grid-column: 1; grid-row: auto; }
   .remote-url-form-actions { justify-content: flex-end; }
   .remote-manager-list { max-height: 220px; }
 }
