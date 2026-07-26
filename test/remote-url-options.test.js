@@ -1,11 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-test('remote URL history deduplicates globally and imports every configured Git URL', async () => {
+test('remote history validates names, deduplicates URLs, and imports configured Git URLs', async () => {
   const {
     mergeConfiguredRemoteUrls,
     normalizeRemoteUrlOptions,
     selectRemoteName,
+    validateRemoteName,
     validateRemoteUrl,
   } = await import('../src/renderer/js/remote-url-options.mjs');
 
@@ -44,6 +45,14 @@ test('remote URL history deduplicates globally and imports every configured Git 
   assert.equal(selectRemoteName('job23', remotes, ['origin']), 'job23');
   assert.equal(selectRemoteName('missing', remotes, ['origin']), 'origin');
   assert.equal(selectRemoteName('', [{ name: 'job23' }]), 'job23');
+  assert.deepEqual(validateRemoteName(' work/account '), {
+    ok: true,
+    remoteName: 'work/account',
+  });
+  assert.equal(validateRemoteName('').ok, false);
+  assert.equal(validateRemoteName('-work').ok, false);
+  assert.equal(validateRemoteName('work remote').ok, false);
+  assert.equal(validateRemoteName('work..remote').ok, false);
   assert.equal(validateRemoteUrl('/tmp/repository.git').ok, true);
   assert.equal(validateRemoteUrl('').ok, false);
 });

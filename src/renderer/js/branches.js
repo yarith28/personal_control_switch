@@ -30,6 +30,14 @@ function reconcileRemoteHistory(project, result) {
     [result.configuredRemote, result.defaultRemote]
   );
 
+  if (selectedRemoteName) {
+    for (const option of options) {
+      if (option.remoteName) continue;
+      option.remoteName = selectedRemoteName;
+      changed = true;
+    }
+  }
+
   const legacyRemotes = normalizeAppRemotes(project.appRemotes);
   for (const legacy of legacyRemotes) {
     if (options.some((option) => option.url === legacy.url)) continue;

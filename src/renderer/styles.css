@@ -2913,8 +2913,28 @@ body.helper-open .projects { overflow: hidden; }
   accent-color: var(--remote-color);
   cursor: pointer;
 }
-.remote-url-row .remote-row-url {
+.remote-row-profile {
+  min-width: 0;
   flex: 1;
+  display: grid;
+  grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.remote-row-name {
+  max-width: 140px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--remote-color) 13%, transparent);
+  color: var(--remote-color);
+  font-size: 9.5px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-url-row .remote-row-url {
+  min-width: 0;
   color: var(--text-muted);
   font-size: 10px;
 }
@@ -2960,9 +2980,24 @@ body.helper-open .projects { overflow: hidden; }
   gap: 7px;
 }
 .remote-url-form[hidden] { display: none; }
-.remote-url-form > input {
+.remote-profile-fields {
   min-width: 0;
-  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(92px, 0.38fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 7px;
+}
+.remote-profile-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 720;
+}
+.remote-profile-field input {
+  min-width: 0;
   padding: 7px 9px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
@@ -2972,7 +3007,7 @@ body.helper-open .projects { overflow: hidden; }
   font: inherit;
   font-size: 10px;
 }
-.remote-url-form > input:focus {
+.remote-profile-field input:focus {
   border-color: var(--remote-color);
   box-shadow: 0 0 0 3px var(--remote-bg);
 }
@@ -3021,6 +3056,7 @@ body.helper-open .projects { overflow: hidden; }
   .remote-target-panel { grid-template-columns: 1fr; }
   .remote-target-current { padding-bottom: 0; }
   .remote-url-form { grid-template-columns: 1fr; }
+  .remote-profile-fields { grid-template-columns: 1fr; }
   .remote-url-form-actions { grid-column: 1; grid-row: auto; }
   .remote-url-form-actions { justify-content: flex-end; }
   .remote-manager-list { max-height: 220px; }

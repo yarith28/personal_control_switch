@@ -12,14 +12,13 @@ export function normalizeRemoteUrlOptions(value) {
   const options = [];
   for (const entry of value) {
     const id = clean(entry?.id);
-    const remoteName = clean(entry?.remoteName);
+    const remoteNameValue = clean(entry?.remoteName);
+    const remoteName = validateRemoteName(remoteNameValue).ok ? remoteNameValue : '';
     const url = clean(entry?.url);
     if (
       !REMOTE_ID_PATTERN.test(id)
-      || remoteName.length > 255
       || !url
       || url.length > 4096
-      || /\p{Cc}/u.test(remoteName)
       || /\p{Cc}/u.test(url)
       || seenIds.has(id)
       || seenUrls.has(url)
@@ -37,6 +36,25 @@ export function validateRemoteUrl(value) {
   if (url.length > 4096) return { ok: false, error: 'The remote URL is too long.' };
   if (/\p{Cc}/u.test(url)) return { ok: false, error: 'The remote URL contains an invalid character.' };
   return { ok: true, url };
+}
+
+export function validateRemoteName(value) {
+  const remoteName = clean(value);
+  const invalidPart = remoteName.split('/').some((part) => (
+    !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock')
+  ));
+  if (!remoteName) return { ok: false, error: 'Enter a remote name.' };
+  if (remoteName.length > 255) return { ok: false, error: 'The remote name is too long.' };
+  if (
+    remoteName.startsWith('-')
+    || invalidPart
+    || remoteName.includes('..')
+    || remoteName.includes('@{')
+    || /[\s~^:?*[\]\\\p{Cc}]/u.test(remoteName)
+  ) {
+    return { ok: false, error: 'Enter a valid Git remote name.' };
+  }
+  return { ok: true, remoteName };
 }
 
 export function selectRemoteName(selectedValue, remotes, fallbacks = []) {
@@ -66,7 +84,15 @@ export function mergeConfiguredRemoteUrls(optionsValue, remotes, makeId) {
     ];
     for (const value of values) {
       const url = clean(value);
-      if (!remoteName || !url || options.some((option) => option.url === url)) continue;
+      if (!remoteName || !url) continue;
+      const existing = options.find((option) => option.url === url);
+      if (existing) {
+        if (!existing.remoteName) {
+          existing.remoteName = remoteName;
+          changed = true;
+        }
+        continue;
+      }
       options.push({ id: makeId(options), remoteName, url });
       changed = true;
     }

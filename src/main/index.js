@@ -97,7 +97,18 @@ function appRemoteRef(remoteId, branch = '') {
 
 function validateGitRemoteName(value) {
   const name = typeof value === 'string' ? value.trim() : '';
-  if (!name || name.length > 255 || /[\u0000-\u001f\u007f]/.test(name)) {
+  const invalidPart = name.split('/').some((part) => (
+    !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock')
+  ));
+  if (
+    !name
+    || name.length > 255
+    || name.startsWith('-')
+    || invalidPart
+    || name.includes('..')
+    || name.includes('@{')
+    || /[\s~^:?*[\]\\\u0000-\u001f\u007f]/u.test(name)
+  ) {
     return {
       ok: false,
       errorCode: 'INVALID_GIT_REMOTE',
@@ -578,58 +589,124 @@ ipcMain.handle('get-git-remotes', async (_, repoPath) => {
   return await listGitRemotes(repoPath);
 });
 
-ipcMain.handle('set-git-remote-url', async (_, repoPath, remoteNameValue, urlValue) => {
-  const remoteName = validateGitRemoteName(remoteNameValue);
-  if (!remoteName.ok) return remoteName;
+ipcMain.handle('change-git-remote', async (
+  _,
+  repoPath,
+  currentNameValue,
+  nextNameValue,
+  urlValue
+) => {
+  const currentName = validateGitRemoteName(currentNameValue);
+  if (!currentName.ok) return currentName;
+  const nextName = validateGitRemoteName(nextNameValue);
+  if (!nextName.ok) return nextName;
   const remoteUrl = validateRemoteUrl(urlValue);
   if (!remoteUrl.ok) return remoteUrl;
 
   const remotesResult = await listGitRemotes(repoPath);
   if (!remotesResult.ok) return remotesResult;
-  const existing = remotesResult.remotes.find((remote) => remote.name === remoteName.name);
+  const existing = remotesResult.remotes.find((remote) => remote.name === currentName.name);
   if (!existing) {
     return {
       ok: false,
       errorCode: 'GIT_REMOTE_NOT_FOUND',
-      errorSummary: `Remote ${remoteName.name} no longer exists.`,
+      errorSummary: `Remote ${currentName.name} no longer exists.`,
       errorRaw: '',
     };
   }
-  if (existing.url === remoteUrl.url) {
-    return { ok: true, unchanged: true, remote: existing };
-  }
-
-  const updated = await runGit(
-    ['remote', 'set-url', remoteName.name, remoteUrl.url],
-    repoPath
-  );
-  if (!updated.ok) {
-    updated.errorSummary = `Could not update ${remoteName.name}.`;
-    return updated;
-  }
-  const refreshed = await listGitRemotes(repoPath);
-  const remote = refreshed.ok
-    ? refreshed.remotes.find((entry) => entry.name === remoteName.name)
-    : null;
-  const verified = remote?.url === remoteUrl.url;
-  if (!verified) {
-    const rollback = await runGit(
-      ['remote', 'set-url', remoteName.name, existing.url],
-      repoPath
-    );
+  const nameChanged = currentName.name !== nextName.name;
+  const urlChanged = existing.url !== remoteUrl.url;
+  if (nameChanged && remotesResult.remotes.some((remote) => remote.name === nextName.name)) {
     return {
       ok: false,
-      errorCode: 'REMOTE_URL_VERIFY_FAILED',
-      errorSummary: rollback.ok
-        ? `Git did not retain the new URL for ${remoteName.name}. The previous URL was restored.`
-        : `Git did not retain the new URL for ${remoteName.name}, and the previous URL could not be restored.`,
-      errorRaw: refreshed.errorRaw || rollback.errorRaw || '',
+      errorCode: 'GIT_REMOTE_ALREADY_EXISTS',
+      errorSummary: `Remote ${nextName.name} already exists. Select it as the target or use another name.`,
+      errorRaw: '',
+    };
+  }
+  if (!nameChanged && !urlChanged) {
+    return {
+      ok: true,
+      unchanged: true,
+      renamed: false,
+      remote: existing,
+      previousName: existing.name,
+      previousUrl: existing.url,
+    };
+  }
+
+  let activeName = currentName.name;
+  if (nameChanged) {
+    const renamed = await runGit(
+      ['remote', 'rename', currentName.name, nextName.name],
+      repoPath
+    );
+    if (!renamed.ok) {
+      renamed.errorSummary = `Could not rename ${currentName.name} to ${nextName.name}.`;
+      return renamed;
+    }
+    activeName = nextName.name;
+  }
+
+  const rollback = async () => {
+    const failures = [];
+    if (urlChanged) {
+      const restoredUrl = existing.url
+        ? await runGit(['remote', 'set-url', activeName, existing.url], repoPath)
+        : await runGit(['config', '--unset-all', `remote.${activeName}.url`], repoPath);
+      if (!restoredUrl.ok) failures.push(restoredUrl.errorRaw || restoredUrl.errorSummary);
+    }
+    if (nameChanged) {
+      const restoredName = await runGit(
+        ['remote', 'rename', activeName, currentName.name],
+        repoPath
+      );
+      if (!restoredName.ok) failures.push(restoredName.errorRaw || restoredName.errorSummary);
+    }
+    return failures.filter(Boolean);
+  };
+
+  if (urlChanged) {
+    const updated = await runGit(
+      ['remote', 'set-url', activeName, remoteUrl.url],
+      repoPath
+    );
+    if (!updated.ok) {
+      const rollbackFailures = await rollback();
+      return {
+        ...updated,
+        errorSummary: rollbackFailures.length
+          ? `Could not update ${activeName}, and the previous remote could not be fully restored.`
+          : `Could not update ${activeName}. The previous remote was restored.`,
+        errorRaw: [updated.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
+      };
+    }
+  }
+
+  const refreshed = await listGitRemotes(repoPath);
+  const remote = refreshed.ok
+    ? refreshed.remotes.find((entry) => entry.name === nextName.name)
+    : null;
+  const oldNameStillExists = nameChanged && refreshed.ok
+    && refreshed.remotes.some((entry) => entry.name === currentName.name);
+  const verified = remote?.url === remoteUrl.url && !oldNameStillExists;
+  if (!verified) {
+    const rollbackFailures = await rollback();
+    return {
+      ok: false,
+      errorCode: 'REMOTE_CHANGE_VERIFY_FAILED',
+      errorSummary: rollbackFailures.length
+        ? `Git did not retain the remote change, and the previous remote could not be fully restored.`
+        : 'Git did not retain the remote change. The previous remote was restored.',
+      errorRaw: [refreshed.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
     };
   }
 
   return {
     ok: true,
+    renamed: nameChanged,
     remote,
+    previousName: existing.name,
     previousUrl: existing.url,
   };
 });
