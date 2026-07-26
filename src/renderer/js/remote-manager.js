@@ -11,6 +11,71 @@ import { iconElement } from './icons.js';
 import { log } from './log.js';
 import { basename } from './util.js';
 
+let activeRemoteUrlTooltip = null;
+
+function hideRemoteUrlTooltip() {
+  if (!activeRemoteUrlTooltip) return;
+  const { element, trigger } = activeRemoteUrlTooltip;
+  element.remove();
+  trigger.removeAttribute('aria-describedby');
+  activeRemoteUrlTooltip = null;
+  window.removeEventListener('resize', hideRemoteUrlTooltip);
+  document.removeEventListener('scroll', hideRemoteUrlTooltip, true);
+}
+
+function showRemoteUrlTooltip(trigger, remoteName, url) {
+  hideRemoteUrlTooltip();
+  if (!url || !trigger.isConnected) return;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'remote-url-tooltip';
+  tooltip.id = `remote-url-tooltip-${globalThis.crypto?.randomUUID?.() || Date.now()}`;
+  tooltip.setAttribute('role', 'tooltip');
+
+  const label = document.createElement('div');
+  label.className = 'remote-url-tooltip-label';
+  label.textContent = `${remoteName} fetch URL`;
+  const value = document.createElement('div');
+  value.className = 'remote-url-tooltip-value';
+  value.textContent = url;
+  tooltip.append(label, value);
+  document.body.appendChild(tooltip);
+
+  const triggerRect = trigger.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const viewportPadding = 10;
+  const gap = 8;
+  const centeredLeft = triggerRect.left + (triggerRect.width - tooltipRect.width) / 2;
+  const left = Math.max(
+    viewportPadding,
+    Math.min(centeredLeft, window.innerWidth - tooltipRect.width - viewportPadding)
+  );
+  const fitsAbove = triggerRect.top - tooltipRect.height - gap >= viewportPadding;
+  const preferredTop = fitsAbove
+    ? triggerRect.top - tooltipRect.height - gap
+    : triggerRect.bottom + gap;
+  const top = Math.max(
+    viewportPadding,
+    Math.min(preferredTop, window.innerHeight - tooltipRect.height - viewportPadding)
+  );
+  const arrowLeft = Math.max(
+    12,
+    Math.min(
+      triggerRect.left + triggerRect.width / 2 - left,
+      tooltipRect.width - 12
+    )
+  );
+
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(top)}px`;
+  tooltip.style.setProperty('--remote-tooltip-arrow-left', `${Math.round(arrowLeft)}px`);
+  tooltip.classList.toggle('below', !fitsAbove);
+  trigger.setAttribute('aria-describedby', tooltip.id);
+  activeRemoteUrlTooltip = { element: tooltip, trigger };
+  window.addEventListener('resize', hideRemoteUrlTooltip);
+  document.addEventListener('scroll', hideRemoteUrlTooltip, true);
+}
+
 function makeRemoteId(options) {
   const existing = new Set(options.map((option) => option.id));
   let id;
@@ -61,9 +126,16 @@ function remoteUrls(remote) {
 }
 
 export function createRemoteTag(project, { disabled = () => false, onChange } = {}) {
+  hideRemoteUrlTooltip();
   const tag = document.createElement('button');
   tag.type = 'button';
   tag.className = 'name-remote';
+
+  const currentTagRemote = () => {
+    const name = String(tag.dataset.remoteName || '').trim();
+    return (Array.isArray(project.gitRemotes) ? project.gitRemotes : [])
+      .find((remote) => remote.name === name) || null;
+  };
 
   const sync = () => {
     const names = Array.isArray(project.gitRemoteNames) ? project.gitRemoteNames : [];
@@ -73,14 +145,34 @@ export function createRemoteTag(project, { disabled = () => false, onChange } = 
       || project.defaultRemote
       || remoteFromUpstream(project, names)
       || 'Remote';
+    const remote = (Array.isArray(project.gitRemotes) ? project.gitRemotes : [])
+      .find((entry) => entry.name === label) || null;
+    const url = String(remote?.url || '').trim();
     tag.textContent = label;
+    tag.dataset.remoteName = remote?.name || '';
+    tag.dataset.remoteUrl = url;
     tag.classList.toggle('unset', label === 'Remote');
-    tag.title = 'Open remote manager';
-    tag.setAttribute('aria-label', 'Open remote manager.');
+    tag.setAttribute(
+      'aria-label',
+      url
+        ? `${label} remote, currently using ${url}. Open remote manager.`
+        : `${label} remote. Open remote manager.`
+    );
   };
+
+  const showTooltip = () => {
+    const remote = currentTagRemote();
+    showRemoteUrlTooltip(tag, remote?.name || '', String(remote?.url || '').trim());
+  };
+
+  tag.addEventListener('mouseenter', showTooltip);
+  tag.addEventListener('mouseleave', hideRemoteUrlTooltip);
+  tag.addEventListener('focus', showTooltip);
+  tag.addEventListener('blur', hideRemoteUrlTooltip);
 
   tag.addEventListener('click', (event) => {
     event.stopPropagation();
+    hideRemoteUrlTooltip();
     if (disabled()) return;
     openRemoteManager(project, {
       onChange: async ({ refresh = false } = {}) => {

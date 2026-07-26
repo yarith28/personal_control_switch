@@ -2694,6 +2694,56 @@ body.helper-open .projects { overflow: hidden; }
 .organize-mode .name-remote,
 .multi-select .name-remote { pointer-events: none; opacity: 0.55; }
 
+.remote-url-tooltip {
+  position: fixed;
+  z-index: 10000;
+  width: max-content;
+  max-width: min(440px, calc(100vw - 20px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--remote-color) 24%, var(--glass-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--dropdown-bg) 94%, transparent);
+  box-shadow: 0 10px 30px var(--glass-shadow);
+  color: var(--text-primary);
+  pointer-events: none;
+  animation: remote-tooltip-in 0.12s ease-out;
+}
+.remote-url-tooltip::after {
+  content: '';
+  position: absolute;
+  left: var(--remote-tooltip-arrow-left, 50%);
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid color-mix(in srgb, var(--remote-color) 24%, var(--glass-border));
+  border-bottom: 1px solid color-mix(in srgb, var(--remote-color) 24%, var(--glass-border));
+  background: var(--dropdown-bg);
+  transform: translateX(-50%) rotate(45deg);
+}
+.remote-url-tooltip.below::after {
+  top: -5px;
+  bottom: auto;
+  transform: translateX(-50%) rotate(225deg);
+}
+.remote-url-tooltip-label {
+  margin-bottom: 3px;
+  color: var(--remote-color);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+.remote-url-tooltip-value {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+}
+@keyframes remote-tooltip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Remote manager follows the same glass modal language as the app dialogs. */
 .remote-manager-overlay { z-index: 9000; }
 .remote-manager-card {
