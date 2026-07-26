@@ -41,6 +41,16 @@ export function validateRemoteUrl(value) {
   return { ok: true, url };
 }
 
+export function selectedRemoteUrlOption(project) {
+  const options = normalizeRemoteUrlOptions(project?.remoteUrls);
+  return options.find((option) => option.id === project?.selectedRemoteUrlId) || null;
+}
+
+export function selectedGitRemoteTarget(project) {
+  const option = selectedRemoteUrlOption(project);
+  return option ? { type: 'git-remote', name: option.remoteName } : null;
+}
+
 export function mergeConfiguredRemoteUrls(optionsValue, remotes, makeId) {
   const options = normalizeRemoteUrlOptions(optionsValue);
   let changed = false;

@@ -16,6 +16,9 @@ function serializeProject(p) {
   if (appRemotes.length) out.appRemotes = appRemotes;
   const remoteUrls = normalizeRemoteUrlOptions(p.remoteUrls);
   if (remoteUrls.length) out.remoteUrls = remoteUrls;
+  if (remoteUrls.some((option) => option.id === p.selectedRemoteUrlId)) {
+    out.selectedRemoteUrlId = p.selectedRemoteUrlId;
+  }
   return out;
 }
 

@@ -2,14 +2,47 @@ import { getProjects } from './state.js';
 import { renderProjects } from './render-list.js';
 import { persist } from './persist.js';
 import { log } from './log.js';
+import {
+  selectedGitRemoteTarget,
+  selectedRemoteUrlOption,
+} from './remote-url-options.mjs';
+
+function reconcileConfiguredRemote(project, result) {
+  const selectedRemote = selectedRemoteUrlOption(project);
+  if (
+    !result.configuredRemote
+    || (
+      selectedRemote?.remoteName === result.configuredRemote
+      && (
+        !result.configuredRemoteUrl
+        || selectedRemote?.url === result.configuredRemoteUrl
+      )
+    )
+  ) return false;
+
+  const configuredOption = (project.remoteUrls || []).find((option) => (
+    option.remoteName === result.configuredRemote
+    && option.url === result.configuredRemoteUrl
+  )) || (project.remoteUrls || []).find((option) => (
+    option.remoteName === result.configuredRemote
+  ));
+  if (!configuredOption || configuredOption.id === project.selectedRemoteUrlId) return false;
+  project.selectedRemoteUrlId = configuredOption.id;
+  return true;
+}
 
 export async function refreshBranches(project) {
-  const res = await window.api.getBranches(project.path);
+  let res = await window.api.getBranches(project.path, selectedGitRemoteTarget(project));
+  if (res.ok && reconcileConfiguredRemote(project, res)) {
+    res = await window.api.getBranches(project.path, selectedGitRemoteTarget(project));
+  }
   if (res.ok) {
     project.branches    = res.branches;
     project.current     = res.current;
     project.hasUpstream = res.hasUpstream;
     project.upstream    = res.upstream || null;
+    project.activeRemote = res.activeRemote || null;
+    project.configuredRemote = res.configuredRemote || null;
     project.ahead       = res.ahead;
     project.behind      = res.behind;
     project.uncommitted = res.uncommitted ?? 0;

@@ -8,6 +8,7 @@ import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
 import { setRowBusy, setRowCancellable, setRowStatus } from './render-row.js';
 import { confirmDialog, promptDialog } from './modal.js';
+import { selectedGitRemoteTarget } from './remote-url-options.mjs';
 
 const LONG_RUNNING_WARNING_MS = 8000;
 let pushSetupPromptQueue = Promise.resolve();
@@ -83,7 +84,9 @@ function confirmPushSetup(projectName) {
 }
 
 export async function pushWithUpstreamPrompt(repoPath, project = null) {
-  const result = await window.api.push(repoPath);
+  const remoteTarget = selectedGitRemoteTarget(project);
+  const result = await window.api.push(repoPath, remoteTarget);
+  if (remoteTarget) return result;
   if (result?.ok || result?.errorCode !== 'NO_UPSTREAM') return result;
 
   const projectName = basename(repoPath);
@@ -201,7 +204,7 @@ export async function doPull(project) {
     startLabel: 'Pulling',
     successLabel: 'pull complete',
     failureLabel: 'pull failed',
-    action: (repoPath) => window.api.pull(repoPath),
+    action: (repoPath, target) => window.api.pull(repoPath, selectedGitRemoteTarget(target)),
     warnLongRunning: true,
     notifyOnFailure: true,
     cancellable: true,
@@ -227,7 +230,7 @@ export async function doFetch(project) {
     startLabel: 'Fetching',
     successLabel: 'fetch complete',
     failureLabel: 'fetch failed',
-    action: (repoPath) => window.api.fetch(repoPath),
+    action: (repoPath, target) => window.api.fetch(repoPath, selectedGitRemoteTarget(target)),
     warnLongRunning: true,
     cancellable: true,
   });
@@ -415,17 +418,23 @@ async function runBatchOp(opName, targets, opFn) {
 
 export async function fetchAllProjects() {
   const targets = getProjects().filter((p) => p.branches);
-  await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
+  await runBatchOp('Fetching', targets, (repoPath, project) => (
+    window.api.fetch(repoPath, selectedGitRemoteTarget(project))
+  ));
 }
 
 export async function fetchFolderProjects(folder) {
   const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
+  await runBatchOp('Fetching', targets, (repoPath, project) => (
+    window.api.fetch(repoPath, selectedGitRemoteTarget(project))
+  ));
 }
 
 export async function pullFolderProjects(folder) {
   const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Pulling', targets, (repoPath) => window.api.pull(repoPath));
+  await runBatchOp('Pulling', targets, (repoPath, project) => (
+    window.api.pull(repoPath, selectedGitRemoteTarget(project))
+  ));
 }
 
 export async function pushFolderProjects(folder) {

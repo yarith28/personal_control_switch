@@ -2672,7 +2672,7 @@ body.helper-open .projects { overflow: hidden; }
 .remote-manager-card {
   width: min(620px, calc(100vw - 36px));
   max-width: 620px;
-  max-height: min(720px, calc(100vh - 36px));
+  max-height: min(860px, calc(100vh - 28px));
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -2731,15 +2731,15 @@ body.helper-open .projects { overflow: hidden; }
 .remote-add-dialog-close:hover,
 .remote-row-action:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
 .remote-manager-list {
-  flex: 1 1 140px;
+  flex: 0 1 auto;
   min-height: 0;
-  max-height: 440px;
-  overflow-y: auto;
+  overflow-y: hidden;
   display: flex;
   flex-direction: column;
   gap: 0;
   padding-right: 3px;
 }
+.remote-manager-list.scrollable { overflow-y: auto; }
 .remote-group {
   min-width: 0;
   display: flex;
@@ -2786,6 +2786,7 @@ body.helper-open .projects { overflow: hidden; }
   border: 1px solid transparent;
   border-radius: 8px;
   color: var(--text-primary);
+  cursor: pointer;
 }
 .remote-url-row:hover { background: var(--glass-bg); }
 .remote-url-row.active {
@@ -2795,6 +2796,7 @@ body.helper-open .projects { overflow: hidden; }
 .remote-url-choice {
   min-width: 0;
   flex: 1;
+  align-self: stretch;
   display: flex;
   align-items: center;
   gap: 10px;

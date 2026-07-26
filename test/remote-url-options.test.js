@@ -5,6 +5,8 @@ test('remote URL options normalize by remote and import current Git URLs', async
   const {
     mergeConfiguredRemoteUrls,
     normalizeRemoteUrlOptions,
+    selectedGitRemoteTarget,
+    selectedRemoteUrlOption,
     validateRemoteUrl,
   } = await import('../src/renderer/js/remote-url-options.mjs');
 
@@ -31,4 +33,7 @@ test('remote URL options normalize by remote and import current Git URLs', async
   ]);
   assert.equal(validateRemoteUrl('/tmp/repository.git').ok, true);
   assert.equal(validateRemoteUrl('').ok, false);
+  const project = { remoteUrls: merged.options, selectedRemoteUrlId: 'two' };
+  assert.equal(selectedRemoteUrlOption(project).remoteName, 'upstream');
+  assert.deepEqual(selectedGitRemoteTarget(project), { type: 'git-remote', name: 'upstream' });
 });

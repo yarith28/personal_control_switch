@@ -9,11 +9,11 @@ contextBridge.exposeInMainWorld('api', {
   resetConfigLocation: () => ipcRenderer.invoke('reset-config-location'),
   pickFolders: () => ipcRenderer.invoke('pick-folder'),
   getPathForFile: (file) => webUtils.getPathForFile(file),
-  getBranches: (repoPath, appRemote = null) => ipcRenderer.invoke('get-branches', repoPath, appRemote),
+  getBranches: (repoPath, remoteTarget = null) => ipcRenderer.invoke('get-branches', repoPath, remoteTarget),
   checkout: (repoPath, branch) => ipcRenderer.invoke('checkout', repoPath, branch),
   createBranch: (repoPath, branch) => ipcRenderer.invoke('create-branch', repoPath, branch),
-  pull: (repoPath, appRemote = null) => ipcRenderer.invoke('pull', repoPath, appRemote),
-  push: (repoPath, appRemote = null) => ipcRenderer.invoke('push', repoPath, appRemote),
+  pull: (repoPath, remoteTarget = null) => ipcRenderer.invoke('pull', repoPath, remoteTarget),
+  push: (repoPath, remoteTarget = null) => ipcRenderer.invoke('push', repoPath, remoteTarget),
   pushSetUpstream: (repoPath) => ipcRenderer.invoke('push-set-upstream', repoPath),
   cancelGit: (repoPath) => ipcRenderer.invoke('cancel-git', repoPath),
   confirmDialog: (opts) => ipcRenderer.invoke('confirm-dialog', opts),
@@ -24,13 +24,16 @@ contextBridge.exposeInMainWorld('api', {
   windowClose: () => ipcRenderer.invoke('window-close'),
   openTerminal: (repoPath) => ipcRenderer.invoke('open-terminal', repoPath),
   openWith: (repoPath, target) => ipcRenderer.invoke('open-with', repoPath, target),
-  fetch: (repoPath, appRemote = null) => ipcRenderer.invoke('fetch', repoPath, appRemote),
+  fetch: (repoPath, remoteTarget = null) => ipcRenderer.invoke('fetch', repoPath, remoteTarget),
   getGitRemotes: (repoPath) => ipcRenderer.invoke('get-git-remotes', repoPath),
   addGitRemote: (repoPath, remoteName, url) => (
     ipcRenderer.invoke('add-git-remote', repoPath, remoteName, url)
   ),
   setGitRemoteUrl: (repoPath, remoteName, url) => (
     ipcRenderer.invoke('set-git-remote-url', repoPath, remoteName, url)
+  ),
+  setActiveGitRemote: (repoPath, remoteName) => (
+    ipcRenderer.invoke('set-active-git-remote', repoPath, remoteName)
   ),
   testAppRemote: (repoPath, appRemote) => ipcRenderer.invoke('test-app-remote', repoPath, appRemote),
   clearAppRemote: (repoPath, remoteId) => ipcRenderer.invoke('clear-app-remote', repoPath, remoteId),
