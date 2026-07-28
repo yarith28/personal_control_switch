@@ -44,6 +44,14 @@ function loadMainHandlers() {
 const handlers = loadMainHandlers();
 const progressEvent = { sender: { send: () => {} } };
 
+test('repository checks preserve Git failure details', async (t) => {
+  const dir = await makeTempDir(t, 'git-sync-not-a-repo-');
+  const result = await handlers.get('get-branches')(null, dir);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'This folder is not currently a Git repository.');
+  assert.match(result.rawError, /not a git repository/i);
+});
+
 async function git(cwd, ...args) {
   const { stdout = '', stderr = '' } = await execFileP('git', args, {
     cwd,
@@ -320,6 +328,10 @@ test('Remote Changer renames a repository remote and changes its URL', async (t)
   assert.equal(changed.previousUrl, firstRemote);
   assert.equal(changed.remote.name, 'work');
   assert.equal(changed.remote.url, secondRemote);
+  assert.deepEqual(changed.remote.urls, [secondRemote]);
+  assert.equal(changed.remote.pushUrl, pushRemote);
+  assert.deepEqual(changed.remote.pushUrls, [pushRemote]);
+  assert.equal(changed.remote.hasExplicitPushUrl, true);
   await assert.rejects(git(repo, 'remote', 'get-url', 'origin'));
   assert.equal((await git(repo, 'remote', 'get-url', 'work')).stdout.trim(), secondRemote);
   assert.equal((await git(repo, 'remote', 'get-url', '--push', 'work')).stdout.trim(), pushRemote);
@@ -340,6 +352,8 @@ test('Remote Changer renames a repository remote and changes its URL', async (t)
   assert.equal(urlOnly.renamed, false);
   assert.equal(urlOnly.remote.name, 'work');
   assert.equal(urlOnly.remote.url, firstRemote);
+  assert.deepEqual(urlOnly.remote.urls, [firstRemote]);
+  assert.deepEqual(urlOnly.remote.pushUrls, [pushRemote]);
   assert.equal((await git(repo, 'remote', 'get-url', '--push', 'work')).stdout.trim(), pushRemote);
   assert.equal(
     (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim(),

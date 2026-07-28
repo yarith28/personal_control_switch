@@ -164,6 +164,19 @@ async function listGitRemotes(repoPath) {
   return { ok: true, remotes };
 }
 
+function changedGitRemote(existing, name, url) {
+  const urls = [url, ...existing.urls.slice(1)];
+  const pushUrls = existing.hasExplicitPushUrl ? existing.pushUrls : urls;
+  return {
+    ...existing,
+    name,
+    url,
+    urls,
+    pushUrl: pushUrls[0] || '',
+    pushUrls,
+  };
+}
+
 function sendGitProgress(event, repoPath, payload) {
   event?.sender?.send('git-progress', { repoPath, ...payload });
 }
@@ -479,7 +492,16 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   }
 
   const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
-  if (!check.ok) return { ok: false, error: 'Not a git repository' };
+  if (!check.ok) {
+    return {
+      ok: false,
+      error: check.errorCode === 'UNSAFE_REPOSITORY'
+        ? `Git does not trust the owner of "${repoPath}". Add this folder to Git safe.directory, then try again.`
+        : (check.errorSummary || 'Could not inspect this Git repository.'),
+      errorCode: check.errorCode || '',
+      rawError: check.errorRaw || '',
+    };
+  }
 
   const branches = await runGit(
     ['branch', '--list', '--format=%(refname:short)'],
@@ -683,29 +705,10 @@ ipcMain.handle('change-git-remote', async (
     }
   }
 
-  const refreshed = await listGitRemotes(repoPath);
-  const remote = refreshed.ok
-    ? refreshed.remotes.find((entry) => entry.name === nextName.name)
-    : null;
-  const oldNameStillExists = nameChanged && refreshed.ok
-    && refreshed.remotes.some((entry) => entry.name === currentName.name);
-  const verified = remote?.url === remoteUrl.url && !oldNameStillExists;
-  if (!verified) {
-    const rollbackFailures = await rollback();
-    return {
-      ok: false,
-      errorCode: 'REMOTE_CHANGE_VERIFY_FAILED',
-      errorSummary: rollbackFailures.length
-        ? `Git did not retain the remote change, and the previous remote could not be fully restored.`
-        : 'Git did not retain the remote change. The previous remote was restored.',
-      errorRaw: [refreshed.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
-    };
-  }
-
   return {
     ok: true,
     renamed: nameChanged,
-    remote,
+    remote: changedGitRemote(existing, nextName.name, remoteUrl.url),
     previousName: existing.name,
     previousUrl: existing.url,
   };

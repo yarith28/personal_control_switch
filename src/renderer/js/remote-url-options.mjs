@@ -71,6 +71,36 @@ export function selectRemoteName(selectedValue, remotes, fallbacks = []) {
   return names[0] || '';
 }
 
+export function applyGitRemoteChange(project, remotesValue, result) {
+  const remotes = Array.isArray(remotesValue) ? [...remotesValue] : [];
+  const previousName = clean(result?.previousName);
+  const remote = result?.remote;
+  const nextName = clean(remote?.name);
+  if (!previousName || !nextName) return remotes;
+
+  const index = remotes.findIndex((entry) => clean(entry?.name) === previousName);
+  if (index === -1) remotes.push(remote);
+  else remotes[index] = remote;
+  remotes.sort((a, b) => clean(a?.name).localeCompare(clean(b?.name)));
+
+  project.selectedRemoteName = nextName;
+  if (previousName !== nextName) {
+    if (project.configuredRemote === previousName) project.configuredRemote = nextName;
+    if (project.defaultRemote === previousName) project.defaultRemote = nextName;
+    if (typeof project.upstream === 'string' && project.upstream.startsWith(`${previousName}/`)) {
+      project.upstream = `${nextName}/${project.upstream.slice(previousName.length + 1)}`;
+    }
+    if (Array.isArray(project.remoteBranches)) {
+      project.remoteBranches = project.remoteBranches.map((branch) => (
+        typeof branch === 'string' && branch.startsWith(`${previousName}/`)
+          ? `${nextName}/${branch.slice(previousName.length + 1)}`
+          : branch
+      ));
+    }
+  }
+  return remotes;
+}
+
 export function mergeConfiguredRemoteUrls(optionsValue, remotes, makeId) {
   const options = normalizeRemoteUrlOptions(optionsValue);
   let changed = JSON.stringify(options) !== JSON.stringify(

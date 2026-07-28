@@ -32,6 +32,20 @@ test('Git failures receive actionable summaries', () => {
     classifyGitFailure(['fetch'], '', 'fatal: unable to access: Could not resolve host').summary,
     'Could not reach the remote repository. Check your network, VPN, or remote URL.'
   );
+  const unsafeRepository = classifyGitFailure(
+    ['rev-parse', '--is-inside-work-tree'],
+    '',
+    [
+      "fatal: detected dubious ownership in repository at '/work/shared-project'",
+      "To add an exception for this directory, call:",
+      "git config --global --add safe.directory /work/shared-project",
+    ].join('\n')
+  );
+  assert.equal(unsafeRepository.code, 'UNSAFE_REPOSITORY');
+  assert.equal(
+    unsafeRepository.summary,
+    'Git blocked this repository because its owner is not trusted.'
+  );
 });
 
 test('the Git runner commits input and reports repository state', async (t) => {

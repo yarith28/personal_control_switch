@@ -1,5 +1,6 @@
 import { normalizeAppRemotes } from './app-remotes.mjs';
 import {
+  applyGitRemoteChange,
   mergeConfiguredRemoteUrls,
   normalizeRemoteUrlOptions,
   selectRemoteName,
@@ -414,10 +415,7 @@ export function openRemoteManager(project, { onChange } = {}) {
         return false;
       }
 
-      const index = gitRemotes.findIndex((entry) => entry.name === remote.name);
-      if (index !== -1) gitRemotes[index] = result.remote;
-      gitRemotes.sort((a, b) => a.name.localeCompare(b.name));
-      project.selectedRemoteName = result.remote.name;
+      gitRemotes = applyGitRemoteChange(project, gitRemotes, result);
       option.remoteName = result.remote.name;
       syncProjectRemotes();
       importConfiguredUrls();
@@ -431,7 +429,7 @@ export function openRemoteManager(project, { onChange } = {}) {
             : `${remote.name} now uses ${option.url}.`,
         'success'
       );
-      await notifyChange({ refresh: !result.unchanged });
+      await notifyChange();
       return true;
     } catch (error) {
       setStatus(error?.message || `Could not update ${remote.name}.`, 'error');

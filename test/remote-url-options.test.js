@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 test('remote history validates names, deduplicates URLs, and imports configured Git URLs', async () => {
   const {
+    applyGitRemoteChange,
     mergeConfiguredRemoteUrls,
     normalizeRemoteUrlOptions,
     selectRemoteName,
@@ -55,4 +56,31 @@ test('remote history validates names, deduplicates URLs, and imports configured 
   assert.equal(validateRemoteName('work..remote').ok, false);
   assert.equal(validateRemoteUrl('/tmp/repository.git').ok, true);
   assert.equal(validateRemoteUrl('').ok, false);
+
+  const project = {
+    selectedRemoteName: 'origin',
+    configuredRemote: 'origin',
+    defaultRemote: 'origin',
+    upstream: 'origin/main',
+    remoteBranches: ['origin/main', 'job23/main'],
+  };
+  const changedRemote = {
+    name: 'work',
+    url: 'https://example.com/work.git',
+    urls: ['https://example.com/work.git'],
+    pushUrl: 'ssh://push.example.com/work.git',
+    pushUrls: ['ssh://push.example.com/work.git'],
+    hasExplicitPushUrl: true,
+  };
+  const changedRemotes = applyGitRemoteChange(
+    project,
+    [{ name: 'origin' }, { name: 'job23' }],
+    { previousName: 'origin', remote: changedRemote }
+  );
+  assert.deepEqual(changedRemotes, [{ name: 'job23' }, changedRemote]);
+  assert.equal(project.selectedRemoteName, 'work');
+  assert.equal(project.configuredRemote, 'work');
+  assert.equal(project.defaultRemote, 'work');
+  assert.equal(project.upstream, 'work/main');
+  assert.deepEqual(project.remoteBranches, ['work/main', 'job23/main']);
 });

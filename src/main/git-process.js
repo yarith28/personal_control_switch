@@ -46,6 +46,14 @@ function classifyGitFailure(args, stdout, stderr) {
   const normalized = raw.toLowerCase();
   const has = (...patterns) => patterns.some((pattern) => normalized.includes(pattern));
 
+  if (has('detected dubious ownership', 'safe.directory', 'is owned by someone else')) {
+    return {
+      code: 'UNSAFE_REPOSITORY',
+      summary: 'Git blocked this repository because its owner is not trusted.',
+      raw,
+    };
+  }
+
   if (
     has(
       'terminal prompts disabled',
