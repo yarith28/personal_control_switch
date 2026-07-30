@@ -1,13 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-test('remote profiles migrate labels, deduplicate URLs, and import configured Git URLs', async () => {
+test('remote history validates names, deduplicates URLs, and imports configured Git URLs', async () => {
   const {
-    applyGitRemoteUrlChange,
+    applyGitRemoteChange,
     mergeConfiguredRemoteUrls,
     normalizeRemoteUrlOptions,
     selectRemoteName,
-    validateProfileName,
+    validateRemoteName,
     validateRemoteUrl,
   } = await import('../src/renderer/js/remote-url-options.mjs');
 
@@ -19,7 +19,7 @@ test('remote profiles migrate labels, deduplicate URLs, and import configured Gi
     { id: 'bad id', profileName: 'origin', url: 'https://example.com/two.git' },
   ]);
   assert.deepEqual(normalized, [
-    { id: 'one', profileName: 'origin', url: 'https://example.com/one.git' },
+    { id: 'one', remoteName: 'origin', url: 'https://example.com/one.git' },
     { id: 'history_only', url: '/tmp/repository.git' },
   ]);
 
@@ -37,36 +37,50 @@ test('remote profiles migrate labels, deduplicate URLs, and import configured Gi
   assert.equal(merged.changed, true);
   assert.deepEqual(merged.options, [
     ...normalized,
-    { id: 'added_1', profileName: 'origin', url: 'https://example.com/two.git' },
-    { id: 'added_2', profileName: 'origin', url: 'https://example.com/mirror.git' },
-    { id: 'added_3', profileName: 'origin', url: 'ssh://push.example.com/repository.git' },
+    { id: 'added_1', remoteName: 'origin', url: 'https://example.com/two.git' },
+    { id: 'added_2', remoteName: 'origin', url: 'https://example.com/mirror.git' },
+    { id: 'added_3', remoteName: 'origin', url: 'ssh://push.example.com/repository.git' },
   ]);
 
   const remotes = [{ name: 'origin' }, { name: 'job23' }];
   assert.equal(selectRemoteName('job23', remotes, ['origin']), 'job23');
   assert.equal(selectRemoteName('missing', remotes, ['origin']), 'origin');
   assert.equal(selectRemoteName('', [{ name: 'job23' }]), 'job23');
-  assert.deepEqual(validateProfileName(' Work account '), {
+  assert.deepEqual(validateRemoteName(' work/account '), {
     ok: true,
-    profileName: 'Work account',
+    remoteName: 'work/account',
   });
-  assert.equal(validateProfileName('').ok, false);
-  assert.equal(validateProfileName('work\u0000account').ok, false);
-  assert.equal(validateProfileName('x'.repeat(65)).ok, false);
+  assert.equal(validateRemoteName('').ok, false);
+  assert.equal(validateRemoteName('-work').ok, false);
+  assert.equal(validateRemoteName('work remote').ok, false);
+  assert.equal(validateRemoteName('work..remote').ok, false);
   assert.equal(validateRemoteUrl('/tmp/repository.git').ok, true);
   assert.equal(validateRemoteUrl('').ok, false);
 
+  const project = {
+    selectedRemoteName: 'origin',
+    configuredRemote: 'origin',
+    defaultRemote: 'origin',
+    upstream: 'origin/main',
+    remoteBranches: ['origin/main', 'job23/main'],
+  };
   const changedRemote = {
-    name: 'origin',
+    name: 'work',
     url: 'https://example.com/work.git',
     urls: ['https://example.com/work.git'],
     pushUrl: 'ssh://push.example.com/work.git',
     pushUrls: ['ssh://push.example.com/work.git'],
     hasExplicitPushUrl: true,
   };
-  const changedRemotes = applyGitRemoteUrlChange(
-    [{ name: 'origin', url: 'https://example.com/old.git' }, { name: 'job23' }],
-    { remote: changedRemote }
+  const changedRemotes = applyGitRemoteChange(
+    project,
+    [{ name: 'origin' }, { name: 'job23' }],
+    { previousName: 'origin', remote: changedRemote }
   );
   assert.deepEqual(changedRemotes, [{ name: 'job23' }, changedRemote]);
+  assert.equal(project.selectedRemoteName, 'work');
+  assert.equal(project.configuredRemote, 'work');
+  assert.equal(project.defaultRemote, 'work');
+  assert.equal(project.upstream, 'work/main');
+  assert.deepEqual(project.remoteBranches, ['work/main', 'job23/main']);
 });

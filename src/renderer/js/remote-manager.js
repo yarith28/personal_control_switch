@@ -1,10 +1,10 @@
 import { normalizeAppRemotes } from './app-remotes.mjs';
 import {
-  applyGitRemoteUrlChange,
+  applyGitRemoteChange,
   mergeConfiguredRemoteUrls,
   normalizeRemoteUrlOptions,
   selectRemoteName,
-  validateProfileName,
+  validateRemoteName,
   validateRemoteUrl,
 } from './remote-url-options.mjs';
 import { persist } from './persist.js';
@@ -216,12 +216,12 @@ export function openRemoteManager(project, { onChange } = {}) {
   const title = document.createElement('div');
   title.className = 'modal-message';
   title.id = 'remote-manager-title';
-  title.textContent = 'Remote profiles';
+  title.textContent = 'Remote changer';
   const intro = document.createElement('div');
   intro.className = 'remote-manager-intro';
-  intro.textContent = 'Choose an existing Git remote, then switch its URL using a saved profile.';
+  intro.textContent = 'Choose an existing Git remote, then change its name and URL from reusable history.';
   headingWrap.append(eyebrow, title, intro);
-  const closeButton = iconButton('remote-manager-close', 'x', 'Close remote profiles');
+  const closeButton = iconButton('remote-manager-close', 'x', 'Close remote changer');
   header.append(headingWrap, closeButton);
 
   const targetPanel = document.createElement('div');
@@ -271,7 +271,7 @@ export function openRemoteManager(project, { onChange } = {}) {
     status.classList.toggle('error', tone === 'error');
     status.classList.toggle('success', tone === 'success');
     if (tone === 'error' && message) {
-      log(`[${basename(project.path)}] Remote profiles: ${message}`);
+      log(`[${basename(project.path)}] Remote changer: ${message}`);
     }
   };
 
@@ -321,7 +321,7 @@ export function openRemoteManager(project, { onChange } = {}) {
       if (project.remoteUrls.some((option) => option.url === legacy.url)) continue;
       project.remoteUrls.push({
         id: makeRemoteId(project.remoteUrls),
-        ...(selectedRemoteName ? { profileName: selectedRemoteName } : {}),
+        ...(selectedRemoteName ? { remoteName: selectedRemoteName } : {}),
         url: legacy.url,
       });
       changed = true;
@@ -334,8 +334,8 @@ export function openRemoteManager(project, { onChange } = {}) {
     project.selectedRemoteName = selectedRemoteName;
     if (selectedRemoteName) {
       for (const option of project.remoteUrls) {
-        if (option.profileName) continue;
-        option.profileName = selectedRemoteName;
+        if (option.remoteName) continue;
+        option.remoteName = selectedRemoteName;
         changed = true;
       }
     }
@@ -353,7 +353,7 @@ export function openRemoteManager(project, { onChange } = {}) {
       option.textContent = 'No Git remotes';
       targetSelect.appendChild(option);
       targetSelect.disabled = true;
-      targetCurrent.textContent = 'This tool changes existing Git remote URLs but does not create remotes.';
+      targetCurrent.textContent = 'Remote Changer renames existing Git remotes but does not create them.';
       return;
     }
 
@@ -379,19 +379,31 @@ export function openRemoteManager(project, { onChange } = {}) {
       setStatus('Select an existing Git remote before using a saved remote.', 'error');
       return false;
     }
-    const nameValidation = validateProfileName(option.profileName || remote.name);
+    const nameValidation = validateRemoteName(option.remoteName || remote.name);
     if (!nameValidation.ok) {
       setStatus(nameValidation.error, 'error');
       return false;
     }
-    const profileName = nameValidation.profileName;
+    const nextName = nameValidation.remoteName;
+    if (gitRemotes.some((entry) => entry.name === nextName && entry.name !== remote.name)) {
+      setStatus(
+        `Remote ${nextName} already exists. Select it as the target or use another name.`,
+        'error'
+      );
+      return false;
+    }
 
     setBusy(true);
-    setStatus(`Switching ${remote.name} to ${profileName}...`);
+    setStatus(
+      nextName === remote.name
+        ? `Updating ${remote.name}...`
+        : `Renaming ${remote.name} to ${nextName}...`
+    );
     try {
-      const result = await window.api.setGitRemoteUrl(
+      const result = await window.api.changeGitRemote(
         project.path,
         remote.name,
+        nextName,
         option.url
       );
       if (!result.ok) {
@@ -403,15 +415,18 @@ export function openRemoteManager(project, { onChange } = {}) {
         return false;
       }
 
-      gitRemotes = applyGitRemoteUrlChange(gitRemotes, result);
+      gitRemotes = applyGitRemoteChange(project, gitRemotes, result);
+      option.remoteName = result.remote.name;
       syncProjectRemotes();
       importConfiguredUrls();
       renderTarget();
       renderHistory();
       setStatus(
         result.unchanged
-          ? `${remote.name} already uses the ${profileName} profile.`
-          : `${remote.name} now uses the ${profileName} profile.`,
+          ? `${remote.name} already uses this name and URL.`
+          : result.renamed
+            ? `${remote.name} changed to ${result.remote.name} using ${option.url}.`
+            : `${remote.name} now uses ${option.url}.`,
         'success'
       );
       await notifyChange();
@@ -439,10 +454,10 @@ export function openRemoteManager(project, { onChange } = {}) {
     const nameField = document.createElement('label');
     nameField.className = 'remote-profile-field remote-profile-name-field';
     const nameLabel = document.createElement('span');
-    nameLabel.textContent = 'Profile name';
+    nameLabel.textContent = 'Remote name';
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
-    nameInput.placeholder = 'Work GitHub';
+    nameInput.placeholder = 'origin';
     nameInput.autocomplete = 'off';
     nameInput.spellcheck = false;
     nameField.append(nameLabel, nameInput);
@@ -490,7 +505,7 @@ export function openRemoteManager(project, { onChange } = {}) {
       formStatus.classList.toggle('error', tone === 'error');
       formStatus.classList.toggle('success', tone === 'success');
       if (tone === 'error' && message) {
-        log(`[${basename(project.path)}] Remote profiles: ${message}`);
+        log(`[${basename(project.path)}] Remote changer: ${message}`);
       }
     };
 
@@ -505,7 +520,7 @@ export function openRemoteManager(project, { onChange } = {}) {
 
     const show = (option = null) => {
       editingId = option?.id || null;
-      nameInput.value = option?.profileName || currentRemote()?.name || '';
+      nameInput.value = option?.remoteName || currentRemote()?.name || '';
       urlInput.value = option?.url || '';
       saveButton.textContent = option ? 'Save' : 'Add';
       saveUseButton.textContent = option ? 'Save & use' : 'Add & use';
@@ -522,7 +537,7 @@ export function openRemoteManager(project, { onChange } = {}) {
     cancelButton.addEventListener('click', hide);
 
     testButton.addEventListener('click', async () => {
-      const nameValidation = validateProfileName(nameInput.value);
+      const nameValidation = validateRemoteName(nameInput.value);
       const urlValidation = validateRemoteUrl(urlInput.value);
       if (!nameValidation.ok || !urlValidation.ok) {
         setFormStatus(nameValidation.error || urlValidation.error, 'error');
@@ -535,7 +550,7 @@ export function openRemoteManager(project, { onChange } = {}) {
       try {
         const result = await window.api.testAppRemote(project.path, {
           id: editingId || makeRemoteId(project.remoteUrls),
-          name: nameValidation.profileName,
+          name: nameValidation.remoteName,
           url: urlValidation.url,
         });
         setFormStatus(
@@ -552,7 +567,7 @@ export function openRemoteManager(project, { onChange } = {}) {
     });
 
     const saveDraft = async (use) => {
-      const nameValidation = validateProfileName(nameInput.value);
+      const nameValidation = validateRemoteName(nameInput.value);
       const urlValidation = validateRemoteUrl(urlInput.value);
       if (!nameValidation.ok || !urlValidation.ok) {
         setFormStatus(nameValidation.error || urlValidation.error, 'error');
@@ -565,18 +580,18 @@ export function openRemoteManager(project, { onChange } = {}) {
       )) || null;
       let option = duplicate;
       if (duplicate) {
-        duplicate.profileName = nameValidation.profileName;
+        duplicate.remoteName = nameValidation.remoteName;
         if (existing) {
           project.remoteUrls = project.remoteUrls.filter((entry) => entry.id !== existing.id);
         }
       } else if (existing) {
-        existing.profileName = nameValidation.profileName;
+        existing.remoteName = nameValidation.remoteName;
         existing.url = urlValidation.url;
         option = existing;
       } else {
         option = {
           id: makeRemoteId(project.remoteUrls),
-          profileName: nameValidation.profileName,
+          remoteName: nameValidation.remoteName,
           url: urlValidation.url,
         };
         project.remoteUrls.push(option);
@@ -589,7 +604,7 @@ export function openRemoteManager(project, { onChange } = {}) {
         await useOption(option);
       } else {
         setStatus(
-          duplicate ? 'That URL was already saved; its profile name was updated.' : 'Profile saved.',
+          duplicate ? 'That URL was already saved; its remote name was updated.' : 'Remote saved.',
           'success'
         );
         await notifyChange();
@@ -616,7 +631,7 @@ export function openRemoteManager(project, { onChange } = {}) {
     groupHeader.className = 'remote-group-header';
     const groupName = document.createElement('h3');
     groupName.className = 'remote-group-name';
-    groupName.textContent = 'Profiles';
+    groupName.textContent = 'Remote history';
     const count = document.createElement('span');
     count.className = 'remote-history-count';
     count.textContent = `${project.remoteUrls.length} saved`;
@@ -633,13 +648,14 @@ export function openRemoteManager(project, { onChange } = {}) {
     if (!project.remoteUrls.length) {
       const empty = document.createElement('div');
       empty.className = 'remote-manager-empty';
-      empty.textContent = 'No saved profiles yet.';
+      empty.textContent = 'No saved remotes yet.';
       optionList.appendChild(empty);
     }
 
     for (const option of project.remoteUrls) {
-      const profileName = option.profileName || activeRemote?.name || '';
+      const profileName = option.remoteName || activeRemote?.name || '';
       const active = !!activeUrl
+        && profileName === activeRemote?.name
         && option.url === activeUrl;
       const configured = protectedUrls.has(option.url);
       const row = document.createElement('div');
@@ -656,14 +672,14 @@ export function openRemoteManager(project, { onChange } = {}) {
       radio.setAttribute(
         'aria-label',
         activeRemote
-          ? `Use ${profileName} profile for ${activeRemote.name}: ${option.url}`
-          : `Saved profile ${profileName} using ${option.url}`
+          ? `Change ${activeRemote.name} to ${profileName} using ${option.url}`
+          : `Saved remote ${profileName} using ${option.url}`
       );
       const profile = document.createElement('span');
       profile.className = 'remote-row-profile';
       const name = document.createElement('span');
       name.className = 'remote-row-name';
-      name.textContent = profileName || 'Profile name needed';
+      name.textContent = profileName || 'Remote name needed';
       const url = document.createElement('span');
       url.className = 'remote-row-url';
       url.textContent = option.url;
@@ -679,13 +695,13 @@ export function openRemoteManager(project, { onChange } = {}) {
       const editButton = iconButton(
         'remote-row-action',
         'pencil',
-        `Edit ${profileName || 'saved profile'} using ${option.url}`
+        `Edit ${profileName || 'saved remote'} using ${option.url}`
       );
       editButton.addEventListener('click', () => formControl.show(option));
       const deleteButton = iconButton(
         'remote-row-action danger',
         'trash2',
-        `Delete ${profileName || 'saved profile'} using ${option.url}`
+        `Delete ${profileName || 'saved remote'} using ${option.url}`
       );
       deleteButton.disabled = configured;
       deleteButton.dataset.locked = String(configured);
@@ -696,8 +712,8 @@ export function openRemoteManager(project, { onChange } = {}) {
       deleteButton.addEventListener('click', async () => {
         if (configured) return;
         const confirmed = await confirmDialog({
-          message: 'Delete this saved profile?',
-          detail: `${profileName || 'Profile'} — ${option.url}`,
+          message: 'Delete this saved remote?',
+          detail: `${profileName || 'Remote'} — ${option.url}`,
           confirmText: 'Delete',
         });
         if (!confirmed) return;
@@ -720,7 +736,7 @@ export function openRemoteManager(project, { onChange } = {}) {
     }
     group.appendChild(optionList);
 
-    const addButton = textButton('remote-add-url', 'plus', 'Add profile');
+    const addButton = textButton('remote-add-url', 'plus', 'Add remote');
     group.appendChild(addButton);
     formControl = buildRemoteForm(group, addButton);
     list.appendChild(group);

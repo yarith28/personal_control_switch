@@ -164,11 +164,12 @@ async function listGitRemotes(repoPath) {
   return { ok: true, remotes };
 }
 
-function changedGitRemoteUrl(existing, url) {
+function changedGitRemote(existing, name, url) {
   const urls = existing.urls.map((entry) => entry === existing.url ? url : entry);
   const pushUrls = existing.hasExplicitPushUrl ? existing.pushUrls : urls;
   return {
     ...existing,
+    name,
     url,
     urls,
     pushUrl: pushUrls[0] || '',
@@ -178,6 +179,291 @@ function changedGitRemoteUrl(existing, url) {
 
 function exactGitConfigValuePattern(value) {
   return `^${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
+}
+
+async function listLocalGitConfig(repoPath) {
+  const result = await runGit(['config', '--local', '--list'], repoPath);
+  if (!result.ok) return result;
+  const entries = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.indexOf('=');
+      return separator === -1
+        ? { key: line, value: '' }
+        : { key: line.slice(0, separator), value: line.slice(separator + 1) };
+    });
+  return { ok: true, entries };
+}
+
+async function renameGitRemoteConfig(repoPath, currentName, nextName) {
+  const configResult = await listLocalGitConfig(repoPath);
+  if (!configResult.ok) return configResult;
+
+  const currentPrefix = remoteTrackingPrefix(currentName);
+  const nextPrefix = remoteTrackingPrefix(nextName);
+  const currentFetchKey = `remote.${currentName}.fetch`.toLowerCase();
+  const nextFetchKey = `remote.${nextName}.fetch`;
+  const updates = [];
+  const seenUpdates = new Set();
+  for (const entry of configResult.entries) {
+    const key = entry.key.toLowerCase();
+    let update = null;
+    if (key === currentFetchKey && entry.value.includes(currentPrefix)) {
+      update = {
+        key: nextFetchKey,
+        previousValue: entry.value,
+        nextValue: entry.value.split(currentPrefix).join(nextPrefix),
+      };
+    } else if (
+      entry.value === currentName
+      && (
+        key === 'remote.pushdefault'
+        || (
+          key.startsWith('branch.')
+          && (key.endsWith('.remote') || key.endsWith('.pushremote'))
+        )
+      )
+    ) {
+      update = {
+        key: entry.key,
+        previousValue: currentName,
+        nextValue: nextName,
+      };
+    }
+    if (!update) continue;
+    const signature = `${update.key}\0${update.previousValue}\0${update.nextValue}`;
+    if (seenUpdates.has(signature)) continue;
+    seenUpdates.add(signature);
+    updates.push(update);
+  }
+
+  const renamedSection = await runGit(
+    ['config', '--local', '--rename-section', `remote.${currentName}`, `remote.${nextName}`],
+    repoPath
+  );
+  if (!renamedSection.ok) {
+    renamedSection.errorSummary = `Could not rename ${currentName} to ${nextName}.`;
+    return renamedSection;
+  }
+
+  const applied = [];
+  for (const update of updates) {
+    const result = await runGit(
+      [
+        'config',
+        '--local',
+        '--replace-all',
+        update.key,
+        update.nextValue,
+        exactGitConfigValuePattern(update.previousValue),
+      ],
+      repoPath
+    );
+    if (result.ok) {
+      applied.push(update);
+      continue;
+    }
+
+    const rollbackFailures = [];
+    for (const completed of [...applied].reverse()) {
+      const restored = await runGit(
+        [
+          'config',
+          '--local',
+          '--replace-all',
+          completed.key,
+          completed.previousValue,
+          exactGitConfigValuePattern(completed.nextValue),
+        ],
+        repoPath
+      );
+      if (!restored.ok) rollbackFailures.push(restored.errorRaw || restored.errorSummary);
+    }
+    const restoredSection = await runGit(
+      ['config', '--local', '--rename-section', `remote.${nextName}`, `remote.${currentName}`],
+      repoPath
+    );
+    if (!restoredSection.ok) {
+      rollbackFailures.push(restoredSection.errorRaw || restoredSection.errorSummary);
+    }
+    return {
+      ...result,
+      errorSummary: rollbackFailures.length
+        ? `Could not rename ${currentName} to ${nextName}, and the config could not be fully restored.`
+        : `Could not rename ${currentName} to ${nextName}. The previous config was restored.`,
+      errorRaw: [result.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
+    };
+  }
+  return { ok: true, reusedTrackingRefs: true };
+}
+
+function remoteTrackingPrefix(remoteName) {
+  return `refs/remotes/${remoteName}/`;
+}
+
+async function listRemoteTrackingRefs(repoPath, remoteName) {
+  const result = await runGit(
+    [
+      'for-each-ref',
+      '--format=%(refname)%00%(objectname)%00%(symref)',
+      remoteTrackingPrefix(remoteName),
+    ],
+    repoPath
+  );
+  if (!result.ok) return result;
+
+  const refs = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [name = '', objectId = '', symbolicTarget = ''] = line.split('\0');
+      return { name, objectId, symbolicTarget };
+    })
+    .filter((ref) => ref.name && ref.objectId);
+  return { ok: true, refs };
+}
+
+function remoteRefMoves(refs, currentName, nextName) {
+  const currentPrefix = remoteTrackingPrefix(currentName);
+  const nextPrefix = remoteTrackingPrefix(nextName);
+  return refs.map((ref) => ({
+    ...ref,
+    nextName: `${nextPrefix}${ref.name.slice(currentPrefix.length)}`,
+    nextSymbolicTarget: ref.symbolicTarget.startsWith(currentPrefix)
+      ? `${nextPrefix}${ref.symbolicTarget.slice(currentPrefix.length)}`
+      : ref.symbolicTarget,
+  }));
+}
+
+async function moveDirectRemoteRefs(repoPath, moves, reverse = false) {
+  const directMoves = moves.filter((move) => !move.symbolicTarget);
+  if (!directMoves.length) return { ok: true };
+
+  const commands = directMoves.flatMap((move) => {
+    const source = reverse ? move.nextName : move.name;
+    const target = reverse ? move.name : move.nextName;
+    return [
+      `create ${target} ${move.objectId}`,
+      `delete ${source} ${move.objectId}`,
+    ];
+  });
+  return await runGitWithInput(
+    ['update-ref', '--stdin'],
+    repoPath,
+    `${commands.join('\n')}\n`
+  );
+}
+
+async function moveSymbolicRemoteRefs(repoPath, moves, reverse = false) {
+  const symbolicMoves = moves.filter((move) => move.symbolicTarget);
+  const completed = [];
+  for (const move of symbolicMoves) {
+    const source = reverse ? move.nextName : move.name;
+    const target = reverse ? move.name : move.nextName;
+    const symbolicTarget = reverse ? move.symbolicTarget : move.nextSymbolicTarget;
+    const created = await runGit(['symbolic-ref', target, symbolicTarget], repoPath);
+    if (!created.ok) return { ...created, completed };
+    const removed = await runGit(['symbolic-ref', '--delete', source], repoPath);
+    if (!removed.ok) {
+      await runGit(['symbolic-ref', '--delete', target], repoPath);
+      return { ...removed, completed };
+    }
+    completed.push(move);
+  }
+  return { ok: true, completed };
+}
+
+async function rollbackRemoteRefMoves(repoPath, moves, symbolicMoves = []) {
+  const failures = [];
+  for (const move of [...symbolicMoves].reverse()) {
+    const restored = await runGit(
+      ['symbolic-ref', move.name, move.symbolicTarget],
+      repoPath
+    );
+    if (!restored.ok) failures.push(restored.errorRaw || restored.errorSummary);
+    const removed = await runGit(['symbolic-ref', '--delete', move.nextName], repoPath);
+    if (!removed.ok) failures.push(removed.errorRaw || removed.errorSummary);
+  }
+  const direct = await moveDirectRemoteRefs(repoPath, moves, true);
+  if (!direct.ok) failures.push(direct.errorRaw || direct.errorSummary);
+  return failures.filter(Boolean);
+}
+
+async function moveRemoteTrackingRefs(repoPath, currentName, nextName) {
+  const currentPrefix = remoteTrackingPrefix(currentName);
+  const nextPrefix = remoteTrackingPrefix(nextName);
+  if (currentPrefix.startsWith(nextPrefix) || nextPrefix.startsWith(currentPrefix)) {
+    return {
+      ok: false,
+      fallback: true,
+      errorSummary: 'Nested remote names require the standard Git rename path.',
+      errorRaw: '',
+    };
+  }
+
+  const [sourceResult, targetResult] = await Promise.all([
+    listRemoteTrackingRefs(repoPath, currentName),
+    listRemoteTrackingRefs(repoPath, nextName),
+  ]);
+  if (!sourceResult.ok) return sourceResult;
+  if (!targetResult.ok) return targetResult;
+  if (targetResult.refs.length) {
+    return {
+      ok: true,
+      reuseTarget: true,
+    };
+  }
+
+  const moves = remoteRefMoves(sourceResult.refs, currentName, nextName);
+  const direct = await moveDirectRemoteRefs(repoPath, moves);
+  if (!direct.ok) return direct;
+
+  const symbolic = await moveSymbolicRemoteRefs(repoPath, moves);
+  if (!symbolic.ok) {
+    const rollbackFailures = await rollbackRemoteRefMoves(
+      repoPath,
+      moves,
+      symbolic.completed
+    );
+    return {
+      ...symbolic,
+      errorSummary: rollbackFailures.length
+        ? 'Could not move remote-tracking refs, and they could not be fully restored.'
+        : 'Could not move remote-tracking refs. The previous refs were restored.',
+      errorRaw: [symbolic.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
+    };
+  }
+  return { ok: true, moves };
+}
+
+async function renameGitRemoteFast(repoPath, currentName, nextName) {
+  const moved = await moveRemoteTrackingRefs(repoPath, currentName, nextName);
+  if (moved.fallback) {
+    return await runGit(['remote', 'rename', currentName, nextName], repoPath);
+  }
+  if (!moved.ok) return moved;
+  if (moved.reuseTarget) {
+    return await renameGitRemoteConfig(repoPath, currentName, nextName);
+  }
+
+  // Git now has no refs left under the old namespace, so it can update every
+  // relevant config key without walking hundreds of refs one by one.
+  const renamed = await runGit(['remote', 'rename', currentName, nextName], repoPath);
+  if (renamed.ok) return renamed;
+
+  const rollbackFailures = await rollbackRemoteRefMoves(
+    repoPath,
+    moved.moves,
+    moved.moves.filter((move) => move.symbolicTarget)
+  );
+  return {
+    ...renamed,
+    errorSummary: rollbackFailures.length
+      ? `Could not rename ${currentName} to ${nextName}, and the refs could not be fully restored.`
+      : `Could not rename ${currentName} to ${nextName}. The previous refs were restored.`,
+    errorRaw: [renamed.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
+  };
 }
 
 function sendGitProgress(event, repoPath, payload) {
@@ -614,60 +900,97 @@ ipcMain.handle('get-git-remotes', async (_, repoPath) => {
   return await listGitRemotes(repoPath);
 });
 
-ipcMain.handle('set-git-remote-url', async (
+ipcMain.handle('change-git-remote', async (
   _,
   repoPath,
-  remoteNameValue,
+  currentNameValue,
+  nextNameValue,
   urlValue
 ) => {
-  const remoteName = validateGitRemoteName(remoteNameValue);
-  if (!remoteName.ok) return remoteName;
+  const currentName = validateGitRemoteName(currentNameValue);
+  if (!currentName.ok) return currentName;
+  const nextName = validateGitRemoteName(nextNameValue);
+  if (!nextName.ok) return nextName;
   const remoteUrl = validateRemoteUrl(urlValue);
   if (!remoteUrl.ok) return remoteUrl;
 
   const remotesResult = await listGitRemotes(repoPath);
   if (!remotesResult.ok) return remotesResult;
-  const existing = remotesResult.remotes.find((remote) => remote.name === remoteName.name);
+  const existing = remotesResult.remotes.find((remote) => remote.name === currentName.name);
   if (!existing) {
     return {
       ok: false,
       errorCode: 'GIT_REMOTE_NOT_FOUND',
-      errorSummary: `Remote ${remoteName.name} no longer exists.`,
+      errorSummary: `Remote ${currentName.name} no longer exists.`,
       errorRaw: '',
     };
   }
+  const nameChanged = currentName.name !== nextName.name;
   const urlChanged = existing.url !== remoteUrl.url;
-  if (!urlChanged) {
+  if (nameChanged && remotesResult.remotes.some((remote) => remote.name === nextName.name)) {
+    return {
+      ok: false,
+      errorCode: 'GIT_REMOTE_ALREADY_EXISTS',
+      errorSummary: `Remote ${nextName.name} already exists. Select it as the target or use another name.`,
+      errorRaw: '',
+    };
+  }
+  if (!nameChanged && !urlChanged) {
     return {
       ok: true,
       unchanged: true,
+      renamed: false,
       remote: existing,
+      previousName: existing.name,
       previousUrl: existing.url,
     };
   }
 
-  // Profile labels are app-only. Keep the Git remote name and its tracking refs
-  // stable, and replace only the current primary URL. The exact value pattern
-  // preserves any secondary fetch URLs configured on the same remote.
-  const updated = await runGit(
-    [
-      'config',
-      '--local',
-      '--replace-all',
-      `remote.${remoteName.name}.url`,
-      remoteUrl.url,
-      exactGitConfigValuePattern(existing.url),
-    ],
-    repoPath
-  );
-  if (!updated.ok) {
-    updated.errorSummary = `Could not update ${remoteName.name}.`;
-    return updated;
+  let activeName = currentName.name;
+  if (nameChanged) {
+    const renamed = await renameGitRemoteFast(repoPath, currentName.name, nextName.name);
+    if (!renamed.ok) return renamed;
+    activeName = nextName.name;
+  }
+
+  if (urlChanged) {
+    // Replace only the current primary URL and preserve secondary fetch URLs.
+    const updated = await runGit(
+      [
+        'config',
+        '--local',
+        '--replace-all',
+        `remote.${activeName}.url`,
+        remoteUrl.url,
+        exactGitConfigValuePattern(existing.url),
+      ],
+      repoPath
+    );
+    if (!updated.ok) {
+      if (!nameChanged) {
+        updated.errorSummary = `Could not update ${activeName}.`;
+        return updated;
+      }
+      const restored = await renameGitRemoteFast(
+        repoPath,
+        activeName,
+        currentName.name
+      );
+      return {
+        ...updated,
+        errorSummary: restored.ok
+          ? `Could not update ${activeName}. The previous remote was restored.`
+          : `Could not update ${activeName}, and the previous remote could not be fully restored.`,
+        errorRaw: [updated.errorRaw, restored.errorRaw].filter(Boolean).join('\n'),
+      };
+    }
   }
 
   return {
     ok: true,
-    remote: changedGitRemoteUrl(existing, remoteUrl.url),
+    renamed: nameChanged,
+    remote: changedGitRemote(existing, nextName.name, remoteUrl.url),
+    previousName: existing.name,
     previousUrl: existing.url,
   };
 });
