@@ -134,7 +134,15 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal(existingRemoteCheckout.created, false);
   await git(second, 'checkout', 'main');
 
+  await commitFile(second, 'local.txt', 'local\n', 'local change');
+  await git(second, 'config', 'pull.rebase', 'false');
+  const rejectingMergeHook = path.join(second, '.git', 'hooks', 'pre-merge-commit');
+  await fs.writeFile(rejectingMergeHook, '#!/bin/sh\nexit 1\n');
+  await fs.chmod(rejectingMergeHook, 0o755);
   await commitFile(first, 'shared.txt', 'two\n', 'from first');
+  const rejectingPushHook = path.join(first, '.git', 'hooks', 'pre-push');
+  await fs.writeFile(rejectingPushHook, '#!/bin/sh\nexit 1\n');
+  await fs.chmod(rejectingPushHook, 0o755);
   assert.equal((await handlers.get('push')(progressEvent, first)).ok, true);
   assert.equal((await handlers.get('fetch')(progressEvent, second)).ok, true);
   const branches = await handlers.get('get-branches')(null, second);
@@ -146,11 +154,16 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal(await fs.readFile(path.join(second, 'shared.txt'), 'utf8'), 'two\n');
 
   await fs.writeFile(path.join(second, 'new.txt'), 'new\n');
+  const rejectingCommitHook = path.join(second, '.git', 'hooks', 'pre-commit');
+  await fs.writeFile(rejectingCommitHook, '#!/bin/sh\nexit 1\n');
+  await fs.chmod(rejectingCommitHook, 0o755);
   const status = await handlers.get('git-status')(null, second);
   assert.equal(status.ok, true);
   assert.equal(status.changedCount, 1);
   assert.equal((await handlers.get('git-commit-all')(null, second, 'quick commit', false)).ok, true);
   assert.equal((await git(second, 'log', '-1', '--format=%s')).stdout.trim(), 'quick commit');
+  assert.equal((await handlers.get('git-commit-all')(null, second, 'amended quick commit', true)).ok, true);
+  assert.equal((await git(second, 'log', '-1', '--format=%s')).stdout.trim(), 'amended quick commit');
 
   const created = await handlers.get('create-branch')(null, second, 'feature/new-control');
   assert.equal(created.ok, true, created.errorSummary);
@@ -163,6 +176,9 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal(localOnly.configuredRemote, null);
   assert.equal(localOnly.defaultRemote, 'origin');
 
+  const rejectingSetupPushHook = path.join(second, '.git', 'hooks', 'pre-push');
+  await fs.writeFile(rejectingSetupPushHook, '#!/bin/sh\nexit 1\n');
+  await fs.chmod(rejectingSetupPushHook, 0o755);
   const noUpstream = await handlers.get('push')(progressEvent, second);
   assert.equal(noUpstream.ok, false);
   assert.equal(noUpstream.errorCode, 'NO_UPSTREAM');

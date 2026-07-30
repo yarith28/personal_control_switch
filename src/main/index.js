@@ -1046,9 +1046,13 @@ ipcMain.handle('git-commit-all', async (_, repoPath, message, amend = false) => 
   if (amend) {
     const messageLines = previousMessage.split('\n');
     messageLines[0] = message || messageLines[0] || 'Quick commit';
-    return await runGitWithInput(['commit', '--amend', '-F', '-'], repoPath, messageLines.join('\n'));
+    return await runGitWithInput(
+      ['commit', '--no-verify', '--amend', '-F', '-'],
+      repoPath,
+      messageLines.join('\n')
+    );
   }
-  const args = ['commit'];
+  const args = ['commit', '--no-verify'];
   args.push('-m', message || 'Quick commit');
   const commit = await runGit(args, repoPath);
   return commit;
@@ -1207,16 +1211,20 @@ ipcMain.handle('pull', async (event, repoPath, appRemoteValue = null) => {
       };
     }
 
-    const merged = await runGitStreaming(['merge', '--ff-only', remoteRef], repoPath, (payload) => {
-      sendGitProgress(event, repoPath, payload);
-    });
+    const merged = await runGitStreaming(
+      ['merge', '--no-verify', '--ff-only', remoteRef],
+      repoPath,
+      (payload) => {
+        sendGitProgress(event, repoPath, payload);
+      }
+    );
     if (!merged.ok && /fast-forward|diverg/i.test(merged.errorRaw || '')) {
       merged.errorSummary = 'Fast-forward pull is not possible because the local and remote branches have diverged.';
       merged.errorCode = 'FF_ONLY_REQUIRED';
     }
     return merged;
   }
-  return await runGitStreaming(['pull'], repoPath, (payload) => {
+  return await runGitStreaming(['pull', '--no-verify'], repoPath, (payload) => {
     sendGitProgress(event, repoPath, payload);
   });
 });
@@ -1229,7 +1237,7 @@ ipcMain.handle('push', async (event, repoPath, appRemoteValue = null) => {
     if (!branchResult.ok) return branchResult;
     const branchRef = `refs/heads/${branchResult.branch}`;
     const result = await runGitStreaming(
-      ['push', '--', appRemoteResult.remote.url, `${branchRef}:${branchRef}`],
+      ['push', '--no-verify', '--', appRemoteResult.remote.url, `${branchRef}:${branchRef}`],
       repoPath,
       (payload) => sendGitProgress(event, repoPath, payload)
     );
@@ -1238,7 +1246,7 @@ ipcMain.handle('push', async (event, repoPath, appRemoteValue = null) => {
     }
     return result;
   }
-  return await runGitStreaming(['push'], repoPath, (payload) => {
+  return await runGitStreaming(['push', '--no-verify'], repoPath, (payload) => {
     sendGitProgress(event, repoPath, payload);
   });
 });
@@ -1321,7 +1329,7 @@ ipcMain.handle('push-set-upstream', async (event, repoPath) => {
   const target = await resolvePushSetupTarget(repoPath);
   if (!target.ok) return target;
   const result = await runGitStreaming(
-    ['push', '--set-upstream', target.remote, target.branch],
+    ['push', '--no-verify', '--set-upstream', target.remote, target.branch],
     repoPath,
     (payload) => event.sender.send('git-progress', { repoPath, ...payload })
   );
