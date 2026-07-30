@@ -258,25 +258,31 @@ test('app-managed remote operations use one URL without changing Git configurati
   assert.equal(await fs.readFile(configPath, 'utf8'), configBefore);
 });
 
-test('Remote Changer renames a repository remote and changes its URL', async (t) => {
+test('Remote Profiles changes a repository remote URL without renaming it', async (t) => {
   const root = await makeTempDir(t, 'git-sync-remote-manager-');
   const firstRemote = path.join(root, 'first.git');
   const secondRemote = path.join(root, 'second.git');
+  const mirrorRemote = path.join(root, 'mirror.git');
   const pushRemote = path.join(root, 'push.git');
   const repo = path.join(root, 'repo');
   await fs.mkdir(firstRemote);
   await git(firstRemote, 'init', '--bare');
   await fs.mkdir(secondRemote);
   await git(secondRemote, 'init', '--bare');
+  await fs.mkdir(mirrorRemote);
+  await git(mirrorRemote, 'init', '--bare');
   await fs.mkdir(pushRemote);
   await git(pushRemote, 'init', '--bare');
   await fs.mkdir(repo);
   await initRepo(repo);
+  await commitFile(repo, 'tracked.txt', 'tracked\n', 'initial commit');
   await git(repo, 'remote', 'add', 'origin', firstRemote);
+  await git(repo, 'remote', 'set-url', '--add', 'origin', mirrorRemote);
   await git(repo, 'remote', 'set-url', '--push', '--add', 'origin', pushRemote);
   await git(repo, 'remote', 'add', 'job23', secondRemote);
   await git(repo, 'config', 'branch.main.remote', 'origin');
   await git(repo, 'config', 'branch.main.merge', 'refs/heads/main');
+  await git(repo, 'update-ref', 'refs/remotes/origin/cached', 'HEAD');
 
   const listed = await handlers.get('get-git-remotes')(null, repo);
   assert.equal(listed.ok, true);
@@ -285,86 +291,85 @@ test('Remote Changer renames a repository remote and changes its URL', async (t)
   assert.deepEqual(originInfo, {
     name: 'origin',
     url: firstRemote,
-    urls: [firstRemote],
+    urls: [firstRemote, mirrorRemote],
     pushUrl: pushRemote,
     pushUrls: [pushRemote],
     hasExplicitPushUrl: true,
   });
   assert.equal(handlers.has('add-git-remote'), false);
   assert.equal(handlers.has('set-active-git-remote'), false);
-  assert.equal(handlers.has('set-git-remote-url'), false);
+  assert.equal(handlers.has('change-git-remote'), false);
+  assert.equal(handlers.has('set-git-remote-url'), true);
 
   const startup = await handlers.get('get-branches')(null, repo);
   assert.equal(startup.ok, true);
   assert.deepEqual(startup.gitRemotes, listed.remotes);
   assert.equal(startup.configuredRemote, 'origin');
   const branchRemoteBefore = (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim();
+  const trackingRefBefore = (
+    await git(repo, 'rev-parse', 'refs/remotes/origin/cached')
+  ).stdout.trim();
 
-  const collision = await handlers.get('change-git-remote')(
+  const changed = await handlers.get('set-git-remote-url')(
     null,
     repo,
     'origin',
-    'job23',
+    secondRemote
+  );
+  assert.equal(changed.ok, true, changed.errorSummary);
+  assert.equal(changed.previousUrl, firstRemote);
+  assert.equal(changed.remote.name, 'origin');
+  assert.equal(changed.remote.url, secondRemote);
+  assert.deepEqual(changed.remote.urls, [secondRemote, mirrorRemote]);
+  assert.equal(changed.remote.pushUrl, pushRemote);
+  assert.deepEqual(changed.remote.pushUrls, [pushRemote]);
+  assert.equal(changed.remote.hasExplicitPushUrl, true);
+  assert.equal((await git(repo, 'remote', 'get-url', 'origin')).stdout.trim(), secondRemote);
+  assert.deepEqual(
+    (await git(repo, 'remote', 'get-url', '--all', 'origin')).stdout.trim().split(/\r?\n/),
+    [secondRemote, mirrorRemote]
+  );
+  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'origin')).stdout.trim(), pushRemote);
+  assert.equal(
+    (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim(),
+    branchRemoteBefore
+  );
+  assert.equal(
+    (await git(repo, 'rev-parse', 'refs/remotes/origin/cached')).stdout.trim(),
+    trackingRefBefore
+  );
+  assert.equal((await git(repo, 'remote', 'get-url', 'job23')).stdout.trim(), secondRemote);
+
+  const unchanged = await handlers.get('set-git-remote-url')(
+    null,
+    repo,
+    'origin',
+    secondRemote
+  );
+  assert.equal(unchanged.ok, true, unchanged.errorSummary);
+  assert.equal(unchanged.unchanged, true);
+
+  const switchedBack = await handlers.get('set-git-remote-url')(
+    null,
+    repo,
+    'origin',
     firstRemote
   );
-  assert.equal(collision.ok, false);
-  assert.equal(collision.errorCode, 'GIT_REMOTE_ALREADY_EXISTS');
-  assert.equal((await git(repo, 'remote', 'get-url', 'origin')).stdout.trim(), firstRemote);
+  assert.equal(switchedBack.ok, true, switchedBack.errorSummary);
+  assert.equal(switchedBack.remote.name, 'origin');
+  assert.equal(switchedBack.remote.url, firstRemote);
+  assert.deepEqual(switchedBack.remote.urls, [firstRemote, mirrorRemote]);
+  assert.deepEqual(switchedBack.remote.pushUrls, [pushRemote]);
+  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'origin')).stdout.trim(), pushRemote);
   assert.equal(
     (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim(),
     branchRemoteBefore
   );
 
-  const changed = await handlers.get('change-git-remote')(
-    null,
-    repo,
-    'origin',
-    'work',
-    secondRemote
-  );
-  assert.equal(changed.ok, true, changed.errorSummary);
-  assert.equal(changed.renamed, true);
-  assert.equal(changed.previousName, 'origin');
-  assert.equal(changed.previousUrl, firstRemote);
-  assert.equal(changed.remote.name, 'work');
-  assert.equal(changed.remote.url, secondRemote);
-  assert.deepEqual(changed.remote.urls, [secondRemote]);
-  assert.equal(changed.remote.pushUrl, pushRemote);
-  assert.deepEqual(changed.remote.pushUrls, [pushRemote]);
-  assert.equal(changed.remote.hasExplicitPushUrl, true);
-  await assert.rejects(git(repo, 'remote', 'get-url', 'origin'));
-  assert.equal((await git(repo, 'remote', 'get-url', 'work')).stdout.trim(), secondRemote);
-  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'work')).stdout.trim(), pushRemote);
-  assert.equal(
-    (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim(),
-    'work'
-  );
-  assert.equal((await git(repo, 'remote', 'get-url', 'job23')).stdout.trim(), secondRemote);
-
-  const urlOnly = await handlers.get('change-git-remote')(
-    null,
-    repo,
-    'work',
-    'work',
-    firstRemote
-  );
-  assert.equal(urlOnly.ok, true, urlOnly.errorSummary);
-  assert.equal(urlOnly.renamed, false);
-  assert.equal(urlOnly.remote.name, 'work');
-  assert.equal(urlOnly.remote.url, firstRemote);
-  assert.deepEqual(urlOnly.remote.urls, [firstRemote]);
-  assert.deepEqual(urlOnly.remote.pushUrls, [pushRemote]);
-  assert.equal((await git(repo, 'remote', 'get-url', '--push', 'work')).stdout.trim(), pushRemote);
-  assert.equal(
-    (await git(repo, 'config', '--get', 'branch.main.remote')).stdout.trim(),
-    'work'
-  );
-
-  const missing = await handlers.get('change-git-remote')(
+  const missing = await handlers.get('set-git-remote-url')(
     null,
     repo,
     'missing',
-    'replacement',
     firstRemote
   );
   assert.equal(missing.ok, false);

@@ -32,8 +32,8 @@ function reconcileRemoteHistory(project, result) {
 
   if (selectedRemoteName) {
     for (const option of options) {
-      if (option.remoteName) continue;
-      option.remoteName = selectedRemoteName;
+      if (option.profileName) continue;
+      option.profileName = selectedRemoteName;
       changed = true;
     }
   }
@@ -43,7 +43,7 @@ function reconcileRemoteHistory(project, result) {
     if (options.some((option) => option.url === legacy.url)) continue;
     options.push({
       id: makeRemoteId(options),
-      ...(selectedRemoteName ? { remoteName: selectedRemoteName } : {}),
+      ...(selectedRemoteName ? { profileName: selectedRemoteName } : {}),
       url: legacy.url,
     });
     changed = true;

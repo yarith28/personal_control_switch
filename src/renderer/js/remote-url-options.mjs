@@ -12,8 +12,8 @@ export function normalizeRemoteUrlOptions(value) {
   const options = [];
   for (const entry of value) {
     const id = clean(entry?.id);
-    const remoteNameValue = clean(entry?.remoteName);
-    const remoteName = validateRemoteName(remoteNameValue).ok ? remoteNameValue : '';
+    const profileNameValue = clean(entry?.profileName || entry?.remoteName);
+    const profileName = validateProfileName(profileNameValue).ok ? profileNameValue : '';
     const url = clean(entry?.url);
     if (
       !REMOTE_ID_PATTERN.test(id)
@@ -25,7 +25,7 @@ export function normalizeRemoteUrlOptions(value) {
     ) continue;
     seenIds.add(id);
     seenUrls.add(url);
-    options.push(remoteName ? { id, remoteName, url } : { id, url });
+    options.push(profileName ? { id, profileName, url } : { id, url });
   }
   return options;
 }
@@ -38,23 +38,14 @@ export function validateRemoteUrl(value) {
   return { ok: true, url };
 }
 
-export function validateRemoteName(value) {
-  const remoteName = clean(value);
-  const invalidPart = remoteName.split('/').some((part) => (
-    !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock')
-  ));
-  if (!remoteName) return { ok: false, error: 'Enter a remote name.' };
-  if (remoteName.length > 255) return { ok: false, error: 'The remote name is too long.' };
-  if (
-    remoteName.startsWith('-')
-    || invalidPart
-    || remoteName.includes('..')
-    || remoteName.includes('@{')
-    || /[\s~^:?*[\]\\\p{Cc}]/u.test(remoteName)
-  ) {
-    return { ok: false, error: 'Enter a valid Git remote name.' };
+export function validateProfileName(value) {
+  const profileName = clean(value);
+  if (!profileName) return { ok: false, error: 'Enter a profile name.' };
+  if (profileName.length > 64) return { ok: false, error: 'The profile name is too long.' };
+  if (/\p{Cc}/u.test(profileName)) {
+    return { ok: false, error: 'The profile name contains an invalid character.' };
   }
-  return { ok: true, remoteName };
+  return { ok: true, profileName };
 }
 
 export function selectRemoteName(selectedValue, remotes, fallbacks = []) {
@@ -71,33 +62,16 @@ export function selectRemoteName(selectedValue, remotes, fallbacks = []) {
   return names[0] || '';
 }
 
-export function applyGitRemoteChange(project, remotesValue, result) {
+export function applyGitRemoteUrlChange(remotesValue, result) {
   const remotes = Array.isArray(remotesValue) ? [...remotesValue] : [];
-  const previousName = clean(result?.previousName);
   const remote = result?.remote;
-  const nextName = clean(remote?.name);
-  if (!previousName || !nextName) return remotes;
+  const remoteName = clean(remote?.name);
+  if (!remoteName) return remotes;
 
-  const index = remotes.findIndex((entry) => clean(entry?.name) === previousName);
+  const index = remotes.findIndex((entry) => clean(entry?.name) === remoteName);
   if (index === -1) remotes.push(remote);
   else remotes[index] = remote;
   remotes.sort((a, b) => clean(a?.name).localeCompare(clean(b?.name)));
-
-  project.selectedRemoteName = nextName;
-  if (previousName !== nextName) {
-    if (project.configuredRemote === previousName) project.configuredRemote = nextName;
-    if (project.defaultRemote === previousName) project.defaultRemote = nextName;
-    if (typeof project.upstream === 'string' && project.upstream.startsWith(`${previousName}/`)) {
-      project.upstream = `${nextName}/${project.upstream.slice(previousName.length + 1)}`;
-    }
-    if (Array.isArray(project.remoteBranches)) {
-      project.remoteBranches = project.remoteBranches.map((branch) => (
-        typeof branch === 'string' && branch.startsWith(`${previousName}/`)
-          ? `${nextName}/${branch.slice(previousName.length + 1)}`
-          : branch
-      ));
-    }
-  }
   return remotes;
 }
 
@@ -117,13 +91,13 @@ export function mergeConfiguredRemoteUrls(optionsValue, remotes, makeId) {
       if (!remoteName || !url) continue;
       const existing = options.find((option) => option.url === url);
       if (existing) {
-        if (!existing.remoteName) {
-          existing.remoteName = remoteName;
+        if (!existing.profileName) {
+          existing.profileName = remoteName;
           changed = true;
         }
         continue;
       }
-      options.push({ id: makeId(options), remoteName, url });
+      options.push({ id: makeId(options), profileName: remoteName, url });
       changed = true;
     }
   }

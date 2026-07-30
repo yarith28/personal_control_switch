@@ -164,17 +164,20 @@ async function listGitRemotes(repoPath) {
   return { ok: true, remotes };
 }
 
-function changedGitRemote(existing, name, url) {
-  const urls = [url, ...existing.urls.slice(1)];
+function changedGitRemoteUrl(existing, url) {
+  const urls = existing.urls.map((entry) => entry === existing.url ? url : entry);
   const pushUrls = existing.hasExplicitPushUrl ? existing.pushUrls : urls;
   return {
     ...existing,
-    name,
     url,
     urls,
     pushUrl: pushUrls[0] || '',
     pushUrls,
   };
+}
+
+function exactGitConfigValuePattern(value) {
+  return `^${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
 
 function sendGitProgress(event, repoPath, payload) {
@@ -611,105 +614,60 @@ ipcMain.handle('get-git-remotes', async (_, repoPath) => {
   return await listGitRemotes(repoPath);
 });
 
-ipcMain.handle('change-git-remote', async (
+ipcMain.handle('set-git-remote-url', async (
   _,
   repoPath,
-  currentNameValue,
-  nextNameValue,
+  remoteNameValue,
   urlValue
 ) => {
-  const currentName = validateGitRemoteName(currentNameValue);
-  if (!currentName.ok) return currentName;
-  const nextName = validateGitRemoteName(nextNameValue);
-  if (!nextName.ok) return nextName;
+  const remoteName = validateGitRemoteName(remoteNameValue);
+  if (!remoteName.ok) return remoteName;
   const remoteUrl = validateRemoteUrl(urlValue);
   if (!remoteUrl.ok) return remoteUrl;
 
   const remotesResult = await listGitRemotes(repoPath);
   if (!remotesResult.ok) return remotesResult;
-  const existing = remotesResult.remotes.find((remote) => remote.name === currentName.name);
+  const existing = remotesResult.remotes.find((remote) => remote.name === remoteName.name);
   if (!existing) {
     return {
       ok: false,
       errorCode: 'GIT_REMOTE_NOT_FOUND',
-      errorSummary: `Remote ${currentName.name} no longer exists.`,
+      errorSummary: `Remote ${remoteName.name} no longer exists.`,
       errorRaw: '',
     };
   }
-  const nameChanged = currentName.name !== nextName.name;
   const urlChanged = existing.url !== remoteUrl.url;
-  if (nameChanged && remotesResult.remotes.some((remote) => remote.name === nextName.name)) {
-    return {
-      ok: false,
-      errorCode: 'GIT_REMOTE_ALREADY_EXISTS',
-      errorSummary: `Remote ${nextName.name} already exists. Select it as the target or use another name.`,
-      errorRaw: '',
-    };
-  }
-  if (!nameChanged && !urlChanged) {
+  if (!urlChanged) {
     return {
       ok: true,
       unchanged: true,
-      renamed: false,
       remote: existing,
-      previousName: existing.name,
       previousUrl: existing.url,
     };
   }
 
-  let activeName = currentName.name;
-  if (nameChanged) {
-    const renamed = await runGit(
-      ['remote', 'rename', currentName.name, nextName.name],
-      repoPath
-    );
-    if (!renamed.ok) {
-      renamed.errorSummary = `Could not rename ${currentName.name} to ${nextName.name}.`;
-      return renamed;
-    }
-    activeName = nextName.name;
-  }
-
-  const rollback = async () => {
-    const failures = [];
-    if (urlChanged) {
-      const restoredUrl = existing.url
-        ? await runGit(['remote', 'set-url', activeName, existing.url], repoPath)
-        : await runGit(['config', '--unset-all', `remote.${activeName}.url`], repoPath);
-      if (!restoredUrl.ok) failures.push(restoredUrl.errorRaw || restoredUrl.errorSummary);
-    }
-    if (nameChanged) {
-      const restoredName = await runGit(
-        ['remote', 'rename', activeName, currentName.name],
-        repoPath
-      );
-      if (!restoredName.ok) failures.push(restoredName.errorRaw || restoredName.errorSummary);
-    }
-    return failures.filter(Boolean);
-  };
-
-  if (urlChanged) {
-    const updated = await runGit(
-      ['remote', 'set-url', activeName, remoteUrl.url],
-      repoPath
-    );
-    if (!updated.ok) {
-      const rollbackFailures = await rollback();
-      return {
-        ...updated,
-        errorSummary: rollbackFailures.length
-          ? `Could not update ${activeName}, and the previous remote could not be fully restored.`
-          : `Could not update ${activeName}. The previous remote was restored.`,
-        errorRaw: [updated.errorRaw, ...rollbackFailures].filter(Boolean).join('\n'),
-      };
-    }
+  // Profile labels are app-only. Keep the Git remote name and its tracking refs
+  // stable, and replace only the current primary URL. The exact value pattern
+  // preserves any secondary fetch URLs configured on the same remote.
+  const updated = await runGit(
+    [
+      'config',
+      '--local',
+      '--replace-all',
+      `remote.${remoteName.name}.url`,
+      remoteUrl.url,
+      exactGitConfigValuePattern(existing.url),
+    ],
+    repoPath
+  );
+  if (!updated.ok) {
+    updated.errorSummary = `Could not update ${remoteName.name}.`;
+    return updated;
   }
 
   return {
     ok: true,
-    renamed: nameChanged,
-    remote: changedGitRemote(existing, nextName.name, remoteUrl.url),
-    previousName: existing.name,
+    remote: changedGitRemoteUrl(existing, remoteUrl.url),
     previousUrl: existing.url,
   };
 });
