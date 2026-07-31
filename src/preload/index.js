@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   createBranch: (repoPath, branch) => ipcRenderer.invoke('create-branch', repoPath, branch),
   pull: (repoPath) => ipcRenderer.invoke('pull', repoPath),
   push: (repoPath) => ipcRenderer.invoke('push', repoPath),
+  getForcePushTarget: (repoPath) => ipcRenderer.invoke('get-force-push-target', repoPath),
+  forcePush: (repoPath, target) => ipcRenderer.invoke('force-push', repoPath, target),
   pushSetUpstream: (repoPath) => ipcRenderer.invoke('push-set-upstream', repoPath),
   cancelGit: (repoPath) => ipcRenderer.invoke('cancel-git', repoPath),
   confirmDialog: (opts) => ipcRenderer.invoke('confirm-dialog', opts),

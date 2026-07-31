@@ -4,7 +4,15 @@ import { basename, displayPath, positionDropdown, withButtonLoading } from './ut
 import { log, logDetails } from './log.js';
 import { persist } from './persist.js';
 import { refreshBranches } from './branches.js';
-import { doPull, doPush, doFetch, doQuickCommit, removeProject, updateBatchButtons } from './actions.js';
+import {
+  doPull,
+  doPush,
+  doForcePush,
+  doFetch,
+  doQuickCommit,
+  removeProject,
+  updateBatchButtons,
+} from './actions.js';
 import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
 import { renderProjects } from './render-list.js';
 import { createBranchPicker } from './branch-picker.js';
@@ -12,6 +20,51 @@ import { createProjectOpenMenu } from './project-open-menu.js';
 import { showToast } from './notify.js';
 import { startDragAutoScroll, stopDragAutoScroll } from './drag-auto-scroll.js';
 import { createRemoteTag } from './remote-manager.js';
+
+const FORCE_PUSH_HOLD_MS = 700;
+
+function bindPushButton(button, { onPush, onForcePush }) {
+  let activePointer = null;
+  let holdTimer = null;
+
+  const cancelHold = () => {
+    if (holdTimer !== null) window.clearTimeout(holdTimer);
+    holdTimer = null;
+    activePointer = null;
+    button.classList.remove('long-press-pending');
+  };
+
+  button.addEventListener('pointerdown', (event) => {
+    if (button.disabled || event.button !== 0 || event.isPrimary === false) return;
+    cancelHold();
+    activePointer = event.pointerId;
+    button.classList.add('long-press-pending');
+    holdTimer = window.setTimeout(() => {
+      holdTimer = null;
+      button.classList.remove('long-press-pending');
+      void onForcePush();
+    }, FORCE_PUSH_HOLD_MS);
+  });
+
+  button.addEventListener('pointerup', (event) => {
+    if (activePointer !== event.pointerId) return;
+    const shouldPush = holdTimer !== null;
+    cancelHold();
+    if (shouldPush && !button.disabled) void onPush();
+  });
+  button.addEventListener('pointercancel', cancelHold);
+  button.addEventListener('pointerleave', cancelHold);
+  button.addEventListener('contextmenu', (event) => {
+    if (activePointer !== null) event.preventDefault();
+  });
+
+  // Pointer clicks are handled on pointerup so a completed long press cannot
+  // also trigger a normal push. Keyboard and assistive clicks have detail 0.
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (event.detail === 0 && !button.disabled) void onPush();
+  });
+}
 
 function rawGitOutput(result) {
   return String(
@@ -280,11 +333,17 @@ export function renderRow(project, parentFolder = null) {
   const pushBtn = document.createElement('button');
   pushBtn.className = 'btn btn-push';
   pushBtn.type = 'button';
-  pushBtn.title = 'Push';
-  pushBtn.setAttribute('aria-label', `Push ${basename(project.path)}`);
+  pushBtn.title = 'Push — hold to force push';
+  pushBtn.setAttribute(
+    'aria-label',
+    `Push ${basename(project.path)}; hold for force push`
+  );
   pushBtn.innerHTML = iconHtml('arrowUp', { size: 11, strokeWidth: 1.85 });
   pushBtn.disabled = !project.branches;
-  pushBtn.addEventListener('click', () => withButtonLoading(pushBtn, () => doPush(project)));
+  bindPushButton(pushBtn, {
+    onPush: () => withButtonLoading(pushBtn, () => doPush(project)),
+    onForcePush: () => withButtonLoading(pushBtn, () => doForcePush(project)),
+  });
   if (project.ahead > 0) {
     const badge = document.createElement('span');
     badge.className = 'btn-badge';

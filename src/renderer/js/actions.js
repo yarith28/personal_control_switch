@@ -221,6 +221,63 @@ export async function doPush(project) {
   });
 }
 
+export async function doForcePush(project) {
+  const projectName = basename(project.path);
+  let target;
+  try {
+    target = await window.api.getForcePushTarget(project.path);
+  } catch (error) {
+    target = {
+      ok: false,
+      errorSummary: error?.message || 'Could not determine the force-push target.',
+      errorRaw: error?.message || '',
+    };
+  }
+
+  if (!target?.ok) {
+    logGitFailure(projectName, 'force push unavailable', target);
+    await notifyUser(
+      `${projectName}: force push unavailable`,
+      target?.errorSummary || 'Could not determine the force-push target.',
+      { tone: 'error' }
+    );
+    return target;
+  }
+
+  const destination = `${target.remote}/${target.remoteBranch}`;
+  const pushUrls = Array.isArray(target.remoteUrls) && target.remoteUrls.length
+    ? target.remoteUrls
+    : [target.remoteUrl].filter(Boolean);
+  const confirmed = await confirmDialog({
+    message: `Force push "${target.branch}" to "${destination}"?`,
+    detail: [
+      `Local branch: ${target.branch}`,
+      `Remote: ${target.remote}`,
+      `${pushUrls.length === 1 ? 'Push URL' : 'Push URLs'}: ${pushUrls.join(', ')}`,
+      `Destination branch: ${target.remoteBranch}`,
+      '',
+      'This can overwrite commits on the remote branch. Other people may lose work.',
+    ].join('\n'),
+    confirmText: 'Force push',
+    danger: true,
+  });
+  if (!confirmed) {
+    log(`[${projectName}] force push cancelled`, true);
+    return { ok: false, cancelled: true, target };
+  }
+
+  return await runProjectAction(project, {
+    actionLabel: `force pushing ${target.branch} to ${destination}`,
+    startLabel: 'Force pushing',
+    successLabel: `force push to ${destination} complete`,
+    failureLabel: `force push to ${destination} failed`,
+    action: (repoPath) => window.api.forcePush(repoPath, target),
+    warnLongRunning: true,
+    notifyOnFailure: true,
+    cancellable: true,
+  });
+}
+
 export async function doFetch(project) {
   await runProjectAction(project, {
     actionLabel: 'fetching',

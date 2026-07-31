@@ -217,6 +217,49 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   assert.equal(clearedIdentity.hasEmailOverride, false);
 });
 
+test('force push reports its exact target, rejects stale confirmation, and skips hooks', async (t) => {
+  const root = await makeTempDir(t, 'git-sync-force-push-');
+  const remote = path.join(root, 'remote.git');
+  const repo = path.join(root, 'repo');
+  await fs.mkdir(remote);
+  await git(remote, 'init', '--bare');
+  await fs.mkdir(repo);
+  await initRepo(repo);
+  await commitFile(repo, 'shared.txt', 'one\n', 'first');
+  const firstCommit = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(repo, 'remote', 'add', 'origin', remote);
+  await git(repo, 'push', '-u', 'origin', 'main');
+  await commitFile(repo, 'shared.txt', 'two\n', 'second');
+  await git(repo, 'push', 'origin', 'main');
+  await git(repo, 'reset', '--hard', firstCommit);
+
+  const rejectingPushHook = path.join(repo, '.git', 'hooks', 'pre-push');
+  await fs.writeFile(rejectingPushHook, '#!/bin/sh\nexit 1\n');
+  await fs.chmod(rejectingPushHook, 0o755);
+
+  const target = await handlers.get('get-force-push-target')(null, repo);
+  assert.deepEqual(target, {
+    ok: true,
+    branch: 'main',
+    remote: 'origin',
+    remoteBranch: 'main',
+    remoteUrl: remote,
+    remoteUrls: [remote],
+  });
+
+  const stale = await handlers.get('force-push')(
+    progressEvent,
+    repo,
+    { ...target, remoteUrl: `${remote}-changed` }
+  );
+  assert.equal(stale.ok, false);
+  assert.equal(stale.errorCode, 'PUSH_TARGET_CHANGED');
+
+  const pushed = await handlers.get('force-push')(progressEvent, repo, target);
+  assert.equal(pushed.ok, true, pushed.errorSummary);
+  assert.equal((await git(remote, 'rev-parse', 'refs/heads/main')).stdout.trim(), firstCommit);
+});
+
 test('app-managed remote operations use one URL without changing Git configuration', async (t) => {
   const root = await makeTempDir(t, 'git-sync-app-remote-');
   const remote = path.join(root, 'remote.git');

@@ -1273,7 +1273,7 @@ ipcMain.handle('clear-app-remote', async (_, repoPath, remoteId) => {
   return { ok: true, removed: refs.stdout.split(/\r?\n/).filter(Boolean).length };
 });
 
-async function resolvePushSetupTarget(repoPath) {
+async function resolvePushTarget(repoPath) {
   const [branchResult, remotesResult] = await Promise.all([
     runGit(['branch', '--show-current'], repoPath),
     runGit(['remote'], repoPath),
@@ -1286,7 +1286,7 @@ async function resolvePushSetupTarget(repoPath) {
     return {
       ok: false,
       errorCode: 'DETACHED_HEAD',
-      errorSummary: 'Check out a local branch before setting an upstream.',
+      errorSummary: 'Check out a local branch before pushing.',
       errorRaw: '',
     };
   }
@@ -1296,7 +1296,7 @@ async function resolvePushSetupTarget(repoPath) {
     return {
       ok: false,
       errorCode: 'NO_REMOTE',
-      errorSummary: 'Add a Git remote before setting an upstream branch.',
+      errorSummary: 'Add a Git remote before pushing.',
       errorRaw: '',
     };
   }
@@ -1317,16 +1317,70 @@ async function resolvePushSetupTarget(repoPath) {
     return {
       ok: false,
       errorCode: 'AMBIGUOUS_REMOTE',
-      errorSummary: 'Choose a default push remote before setting an upstream branch.',
+      errorSummary: 'Choose a default push remote before pushing.',
       errorRaw: `Available remotes: ${remotes.join(', ')}`,
     };
   }
 
-  return { ok: true, branch, remote };
+  const remoteUrlResult = await runGit(
+    ['remote', 'get-url', '--push', '--all', remote],
+    repoPath
+  );
+  if (!remoteUrlResult.ok) return remoteUrlResult;
+  const remoteUrls = remoteUrlResult.stdout
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return {
+    ok: true,
+    branch,
+    remote,
+    remoteBranch: branch,
+    remoteUrl: remoteUrls[0] || '',
+    remoteUrls,
+  };
 }
 
+ipcMain.handle('get-force-push-target', async (_, repoPath) => {
+  return await resolvePushTarget(repoPath);
+});
+
+ipcMain.handle('force-push', async (event, repoPath, expectedTarget = null) => {
+  const target = await resolvePushTarget(repoPath);
+  if (!target.ok) return target;
+
+  const expected = expectedTarget && typeof expectedTarget === 'object'
+    ? expectedTarget
+    : {};
+  const targetChanged = (
+    expected.branch !== target.branch
+    || expected.remote !== target.remote
+    || expected.remoteBranch !== target.remoteBranch
+    || expected.remoteUrl !== target.remoteUrl
+    || JSON.stringify(expected.remoteUrls) !== JSON.stringify(target.remoteUrls)
+  );
+  if (targetChanged) {
+    return {
+      ok: false,
+      errorCode: 'PUSH_TARGET_CHANGED',
+      errorSummary: 'The force-push target changed after confirmation. Long-press Push again to review it.',
+      errorRaw: '',
+      target,
+    };
+  }
+
+  const refspec = `refs/heads/${target.branch}:refs/heads/${target.remoteBranch}`;
+  const result = await runGitStreaming(
+    ['push', '--no-verify', '--force', '--', target.remote, refspec],
+    repoPath,
+    (payload) => sendGitProgress(event, repoPath, payload)
+  );
+  return { ...result, target };
+});
+
 ipcMain.handle('push-set-upstream', async (event, repoPath) => {
-  const target = await resolvePushSetupTarget(repoPath);
+  const target = await resolvePushTarget(repoPath);
   if (!target.ok) return target;
   const result = await runGitStreaming(
     ['push', '--no-verify', '--set-upstream', target.remote, target.branch],
