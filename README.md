@@ -24,11 +24,12 @@ Git Sync is a desktop dashboard for working with multiple Git repositories. It k
 - pnpm 11.9.0 (the version declared in `package.json`)
 - Git available in `PATH`
 
-Recent Node releases include Corepack. If `pnpm` is unavailable, enable it once:
+If `pnpm` is unavailable on a new machine, install the version pinned by this
+project:
 
 ```bash
-corepack enable
-corepack prepare pnpm@11.9.0 --activate
+npm install --global pnpm@11.9.0
+pnpm --version
 ```
 
 ## Setup
@@ -38,6 +39,9 @@ Install the locked dependencies:
 ```bash
 pnpm install --frozen-lockfile
 ```
+
+Use pnpm for this repository; Electron Builder reads the `packageManager` field
+and invokes pnpm while collecting packaged dependencies.
 
 The project post-install step downloads the Electron runtime automatically. No separate Electron command is required.
 
