@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   confirmDialog: (opts) => ipcRenderer.invoke('confirm-dialog', opts),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
   getHomedir: () => ipcRenderer.invoke('get-homedir'),
+  fixPermissions: (repoPath) => ipcRenderer.invoke('fix-permissions', repoPath),
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),

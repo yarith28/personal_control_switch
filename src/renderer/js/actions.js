@@ -291,6 +291,45 @@ export async function doFetch(project) {
   });
 }
 
+export async function doFixPermissions(project) {
+  const projectName = basename(project.path);
+  const confirmed = await confirmDialog({
+    message: `Fix shared permissions for "${projectName}"?`,
+    detail: [
+      'macOS will ask for administrator approval.',
+      '',
+      'Git Sync will make every folder in this repository writable by your primary group and mark the repository as trusted by Git for this account.',
+      '',
+      'Existing file contents, dependencies, commits, and remote settings are not changed. Use this only for a repository intentionally shared between macOS users.',
+    ].join('\n'),
+    confirmText: 'Fix permissions',
+    danger: false,
+  });
+  if (!confirmed) {
+    log(`[${projectName}] permission repair cancelled`, true);
+    return { ok: false, cancelled: true };
+  }
+
+  const result = await runProjectAction(project, {
+    actionLabel: 'fixing shared permissions',
+    startLabel: 'Fixing permissions',
+    successLabel: 'permission repair complete',
+    failureLabel: 'permission repair failed',
+    action: (repoPath) => window.api.fixPermissions(repoPath),
+    notifyOnFailure: true,
+  });
+  if (result?.ok) {
+    showToast(
+      result.trustWarning ? 'Permissions fixed with a warning' : 'Permissions fixed',
+      result.trustWarning
+        ? `${projectName} was repaired, but Git trust could not be updated. See the activity log.`
+        : `${projectName} is ready for shared use.`,
+      { tone: result.trustWarning ? 'warning' : 'default' }
+    );
+  }
+  return result;
+}
+
 export async function doQuickCommit(project) {
   // Sniff working-tree changes first so we don't prompt for a message when
   // there's nothing to stage.
@@ -460,13 +499,13 @@ async function runBatchOp(opName, targets, opFn) {
     targets.forEach((p) => setRowBusy(p, false));
   }
   await refreshAll({ force: true });
-  log(`${opName} done.`, true);
+  const resultSummary = `${okCount} succeeded, ${failCount} failed, ${cancelCount} cancelled.`;
+  log(`${opName} finished: ${resultSummary}`, true);
 
-  if (failCount > 0) {
+  if (failCount > 0 || cancelCount > 0) {
     const completed = completedActionLabel(opName);
-    const body = `${okCount} succeeded, ${failCount} failed${cancelCount ? `, ${cancelCount} cancelled` : ''}.`;
-    await notifyUser(`${completed} finished`, body, {
-      tone: 'error',
+    await notifyUser(`${completed} finished`, resultSummary, {
+      tone: failCount > 0 ? 'error' : 'warning',
     });
   }
 }
@@ -479,16 +518,6 @@ export async function fetchAllProjects() {
 export async function fetchFolderProjects(folder) {
   const targets = folder.items.filter((p) => p.branches);
   await runBatchOp('Fetching', targets, (repoPath) => window.api.fetch(repoPath));
-}
-
-export async function pullFolderProjects(folder) {
-  const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Pulling', targets, (repoPath) => window.api.pull(repoPath));
-}
-
-export async function pushFolderProjects(folder) {
-  const targets = folder.items.filter((p) => p.branches);
-  await runBatchOp('Pushing', targets, pushWithUpstreamPrompt);
 }
 
 export async function batchOp(opName, opFn) {

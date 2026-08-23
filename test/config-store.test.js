@@ -85,3 +85,28 @@ test('a failed update does not poison later configuration saves', async (t) => {
   const saved = JSON.parse(await fs.readFile(configPath, 'utf8'));
   assert.equal(saved.theme, 'forest');
 });
+
+test('an access-denied configuration is never treated as corrupt or overwritten', async () => {
+  let writeCount = 0;
+  let copyCount = 0;
+  const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+  const fsApi = {
+    ...fs,
+    async readFile() { throw denied; },
+    async copyFile() { copyCount += 1; },
+    async writeFile() { writeCount += 1; },
+    async rename() { writeCount += 1; },
+  };
+  const store = createConfigStore({
+    getConfigPath: () => '/shared/config.json',
+    fsApi,
+  });
+
+  await assert.rejects(store.load({ reportRecovery: true }), (error) => error?.code === 'EACCES');
+  await assert.rejects(
+    store.update((config) => { config.theme = 'forest'; }),
+    (error) => error?.code === 'EACCES'
+  );
+  assert.equal(copyCount, 0);
+  assert.equal(writeCount, 0);
+});

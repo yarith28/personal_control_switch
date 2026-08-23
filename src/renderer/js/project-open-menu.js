@@ -1,5 +1,6 @@
 import { basename, positionDropdown } from './util.js';
 import { log } from './log.js';
+import { showToast } from './notify.js';
 
 function targetsForPlatform() {
   const isMac = document.body.classList.contains('platform-darwin');
@@ -49,9 +50,16 @@ export function createProjectOpenMenu({ trigger, projectPath, scope = '', disabl
         optionEvent.stopPropagation();
         dropdown.classList.remove('open');
         trigger.setAttribute('aria-expanded', 'false');
-        const result = await window.api.openWith(projectPath, target.id);
-        if (!result.ok) {
-          log(`[${basename(projectPath)}] failed to open in ${target.label}: ${result.error}`, true);
+        let result;
+        try {
+          result = await window.api.openWith(projectPath, target.id);
+        } catch (error) {
+          result = { ok: false, error: error?.message || String(error) };
+        }
+        if (!result?.ok) {
+          const message = result?.error || `${target.label} could not be opened.`;
+          log(`[${basename(projectPath)}] failed to open in ${target.label}: ${message}`, true);
+          showToast(`Could not open ${target.label}`, message, { tone: 'error' });
         }
       });
       dropdown.appendChild(option);

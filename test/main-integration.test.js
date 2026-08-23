@@ -52,6 +52,71 @@ test('repository checks preserve Git failure details', async (t) => {
   assert.match(result.rawError, /not a git repository/i);
 });
 
+test('status failures are not reported as a clean dashboard or Commit Tool state', async (t) => {
+  const dir = await makeTempDir(t, 'git-sync-broken-index-');
+  await initRepo(dir);
+  await commitFile(dir, 'tracked.txt', 'tracked\n', 'initial');
+  await fs.writeFile(path.join(dir, '.git', 'index'), 'broken-index');
+
+  const branches = await handlers.get('get-branches')(null, dir);
+  assert.equal(branches.ok, false);
+  assert.match(branches.error, /status failed/i);
+  assert.match(branches.rawError, /index/i);
+
+  const history = await handlers.get('commit-tool-history')(null, dir, 100);
+  assert.equal(history.ok, false);
+  assert.match(history.error, /status failed|working tree/i);
+  assert.match(history.raw, /index/i);
+});
+
+test('quick commit preserves staging failure details', async (t) => {
+  const dir = await makeTempDir(t, 'git-sync-stage-error-');
+  await initRepo(dir);
+  await commitFile(dir, 'tracked.txt', 'tracked\n', 'initial');
+  await fs.writeFile(path.join(dir, 'new.txt'), 'new\n');
+  await fs.writeFile(path.join(dir, '.git', 'index.lock'), 'locked');
+
+  const result = await handlers.get('git-commit-all')(null, dir, 'should not commit', false);
+  assert.equal(result.ok, false);
+  assert.equal(result.errorSummary, 'Staging changes failed.');
+  assert.match(result.errorRaw, /index\.lock|another git process/i);
+});
+
+test('Cross Sync propagates comparison and target-status failures', async (t) => {
+  const root = await makeTempDir(t, 'git-sync-cross-errors-');
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'target');
+  await fs.mkdir(source);
+  await fs.mkdir(target);
+  await initRepo(source);
+  await initRepo(target);
+  await commitFile(source, 'source.txt', 'source\n', 'source');
+  await commitFile(target, 'target.txt', 'target\n', 'target');
+
+  const compare = await handlers.get('cross-compare')(null, {
+    sourcePath: source,
+    sourceBranch: 'main',
+    targetPath: target,
+    targetBranch: 'missing-branch',
+  });
+  assert.equal(compare.ok, false);
+  assert.match(compare.error, /compare incoming commits|git command failed/i);
+  assert.match(compare.raw, /unknown revision|ambiguous argument/i);
+
+  await fs.writeFile(path.join(target, '.git', 'index'), 'broken-index');
+  const beforeBranch = (await git(target, 'branch', '--show-current')).stdout.trim();
+  const integrate = await handlers.get('cross-integrate')(null, {
+    sourcePath: source,
+    sourceBranch: 'main',
+    targetPath: target,
+    targetBranch: 'main',
+  });
+  assert.equal(integrate.ok, false);
+  assert.match(integrate.error, /status failed|working tree/i);
+  assert.match(integrate.raw, /index/i);
+  assert.equal((await git(target, 'branch', '--show-current')).stdout.trim(), beforeBranch);
+});
+
 async function git(cwd, ...args) {
   const { stdout = '', stderr = '' } = await execFileP('git', args, {
     cwd,

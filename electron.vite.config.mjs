@@ -14,6 +14,7 @@ export default defineConfig({
           'git-process': resolve(rootDir, 'src/main/git-process.js'),
           'config-store': resolve(rootDir, 'src/main/config-store.js'),
           'config-location': resolve(rootDir, 'src/main/config-location.js'),
+          'permission-fix': resolve(rootDir, 'src/main/permission-fix.js'),
         },
       },
     },

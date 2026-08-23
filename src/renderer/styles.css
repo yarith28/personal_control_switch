@@ -1495,6 +1495,7 @@ input[type='checkbox']:disabled + .checkbox-box {
   transition: background 0.7s linear, transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
 }
 .btn-commit  { background: rgba(245, 158, 11, 0.7); color: white; }
+.btn-permissions { background: rgba(100, 116, 139, 0.72); color: white; }
 .btn-cancel  { background: rgba(220, 38, 38, 0.78); color: white; }
 .btn-icon {
   width: 32px;
@@ -1809,8 +1810,6 @@ input[type='checkbox']:disabled + .checkbox-box {
   background: var(--glass-bg-hover);
   color: var(--text-primary);
 }
-.folder-pull-btn:hover:not(:disabled) { color: #059669; }
-.folder-push-btn:hover:not(:disabled) { color: #2563eb; }
 .fetch-btn:disabled,
 .folder-action-btn:disabled { cursor: not-allowed; }
 /* reveal on hover of the containing row/folder, while an op is running, or when focused */
@@ -2131,6 +2130,7 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
 .project-row .btn-pull,
 .project-row .btn-push,
 .project-row .btn-commit,
+.project-row .btn-permissions,
 .project-row .btn-cancel {
   width: 28px;
   height: 28px;
@@ -2142,6 +2142,10 @@ body:has(.branch-dropdown.open) > .branch-dropdown-backdrop { display: block; }
   position: relative;
   flex-shrink: 0;
 }
+.project-row .btn-permissions { display: none; }
+.platform-darwin .project-row .btn-permissions { display: flex; }
+.helper-row.platform-mac-only { display: none; }
+.platform-darwin .helper-row.platform-mac-only { display: flex; }
 .project-row .btn-cancel[hidden] { display: none; }
 
 .btn-badge {

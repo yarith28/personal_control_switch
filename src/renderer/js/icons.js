@@ -25,6 +25,7 @@ import {
   Settings2,
   Square,
   Trash2,
+  Wrench,
   X,
 } from 'lucide';
 
@@ -57,6 +58,7 @@ const ICONS = {
   settings2: Settings2,
   square: Square,
   trash2: Trash2,
+  wrench: Wrench,
   x: X,
 };
 

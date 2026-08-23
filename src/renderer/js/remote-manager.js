@@ -10,7 +10,7 @@ import {
 import { persist } from './persist.js';
 import { confirmDialog } from './modal.js';
 import { iconElement } from './icons.js';
-import { log } from './log.js';
+import { log, logDetails } from './log.js';
 import { basename } from './util.js';
 
 let activeRemoteUrlTooltip = null;
@@ -557,6 +557,12 @@ export function openRemoteManager(project, { onChange } = {}) {
           result.ok ? 'Connection successful.' : (result.errorSummary || 'Connection failed.'),
           result.ok ? 'success' : 'error'
         );
+        if (!result.ok && result.errorRaw) {
+          logDetails(
+            `[${basename(project.path)}] Remote connection test failed: ${result.errorSummary || 'Connection failed.'}`,
+            result.errorRaw
+          );
+        }
       } catch (error) {
         setFormStatus(error?.message || 'Connection failed.', 'error');
       } finally {

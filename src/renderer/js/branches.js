@@ -67,7 +67,18 @@ function reconcileRemoteHistory(project, result) {
 }
 
 export async function refreshBranches(project) {
-  const res = await window.api.getBranches(project.path);
+  let res;
+  try {
+    res = await window.api.getBranches(project.path);
+  } catch (error) {
+    const detail = error?.message || String(error);
+    res = {
+      ok: false,
+      error: 'Could not refresh this project.',
+      rawError: detail,
+      errorCode: 'IPC_ERROR',
+    };
+  }
   if (res.ok) {
     reconcileRemoteHistory(project, res);
     project.branches    = res.branches;
@@ -81,6 +92,8 @@ export async function refreshBranches(project) {
     project.behind      = res.behind;
     project.uncommitted = res.uncommitted ?? 0;
     project.error       = null;
+    project.errorCode   = '';
+    project.rawError    = '';
     project.missing     = false;
   } else {
     project.branches = null;
@@ -94,6 +107,8 @@ export async function refreshBranches(project) {
     project.defaultRemote = null;
     project.uncommitted = 0;
     project.error = res.error;
+    project.errorCode = res.errorCode || '';
+    project.rawError = res.rawError || '';
     project.missing = !!res.missing;
     project.selected = false;
   }
@@ -131,7 +146,15 @@ export async function refreshAll({ force = false, source = '' } = {}) {
     await workerPool(projects, 4, refreshBranches);
     renderProjects();
     persist();
-    if (source) log(`auto-refresh (${source}): done`, true);
+    if (source) {
+      const failed = projects.filter((project) => project.error).length;
+      log(
+        failed
+          ? `auto-refresh (${source}): completed with ${failed} project error${failed === 1 ? '' : 's'}`
+          : `auto-refresh (${source}): done`,
+        true
+      );
+    }
   } finally {
     _refreshing = false;
     _lastRefresh = Date.now();

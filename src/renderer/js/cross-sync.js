@@ -18,6 +18,11 @@ let autoRefreshReady = false;
 let lastAutoRefreshAt = 0;
 const branchCache = new Map(); // repo path -> { branches, current, error }
 
+function ipcFailure(error, fallback) {
+  const raw = error?.message || String(error);
+  return { ok: false, error: fallback, raw };
+}
+
 function uid() {
   return 'lnk-' + Math.random().toString(36).slice(2, 9);
 }
@@ -57,7 +62,12 @@ async function saveLinks() {
 
 async function getBranches(path) {
   if (branchCache.has(path)) return branchCache.get(path);
-  const res = await window.api.getBranches(path);
+  let res;
+  try {
+    res = await window.api.getBranches(path);
+  } catch (error) {
+    res = ipcFailure(error, 'Could not inspect this repository.');
+  }
   const info = res.ok
     ? { branches: res.branches, current: res.current, error: null }
     : { branches: [], current: null, error: res.error };
@@ -317,10 +327,15 @@ async function compareLink(link, card, btn) {
   const delta = card.querySelector('.link-delta');
   delta?.replaceChildren(el('div', { class: 'link-loading', text: 'Comparing…' }));
   try {
-    const res = await window.api.crossCompare({
-      sourcePath: link.a, sourceBranch,
-      targetPath: link.b, targetBranch,
-    });
+    let res;
+    try {
+      res = await window.api.crossCompare({
+        sourcePath: link.a, sourceBranch,
+        targetPath: link.b, targetBranch,
+      });
+    } catch (error) {
+      res = ipcFailure(error, 'Compare failed before Git returned a result.');
+    }
     if (card.isConnected && link.branchA === sourceBranch && link.branchB === targetBranch) {
       renderDelta(link, card, res);
     }
@@ -430,10 +445,15 @@ async function runIntegrate(link, card, dir, commits = []) {
   if (!confirmed) return;
 
   log(`[cross] updating ${basename(tgtPath)}/${tgtBranch} from ${basename(srcPath)}/${srcBranch} by rebase...`);
-  const res = await window.api.crossIntegrate({
-    sourcePath: srcPath, sourceBranch: srcBranch,
-    targetPath: tgtPath, targetBranch: tgtBranch,
-  });
+  let res;
+  try {
+    res = await window.api.crossIntegrate({
+      sourcePath: srcPath, sourceBranch: srcBranch,
+      targetPath: tgtPath, targetBranch: tgtBranch,
+    });
+  } catch (error) {
+    res = ipcFailure(error, 'Cross Sync failed before Git returned a result.');
+  }
   await handleOpResult(res, `Updated ${basename(tgtPath)}`, tgtPath, link, card);
 }
 
@@ -448,9 +468,14 @@ async function runFetchBranch(link, dir) {
   });
   if (!name) return;
   log(`[cross] copying ${basename(srcPath)}/${srcBranch} → ${basename(tgtPath)} as ${name}...`);
-  const res = await window.api.crossFetchBranch({
-    sourcePath: srcPath, sourceBranch: srcBranch, targetPath: tgtPath, name,
-  });
+  let res;
+  try {
+    res = await window.api.crossFetchBranch({
+      sourcePath: srcPath, sourceBranch: srcBranch, targetPath: tgtPath, name,
+    });
+  } catch (error) {
+    res = ipcFailure(error, 'Copy failed before Git returned a result.');
+  }
   if (res.ok) {
     showToast(`Copied as ${res.name}`, `Local branch in ${basename(tgtPath)}`);
     log(`[cross] copied branch "${res.name}" into ${basename(tgtPath)}`, true);
@@ -489,6 +514,21 @@ function showConflictHelp(card, targetPath) {
   const delta = card.querySelector('.link-delta');
   delta.prepend(el('div', { class: 'conflict-help' }, [
     el('span', { text: 'Resolve it in a terminal, then re-compare.' }),
-    el('button', { class: 'btn', onclick: () => window.api.openTerminal(targetPath) }, ['Open terminal']),
+    el('button', {
+      class: 'btn',
+      onclick: async () => {
+        let result;
+        try {
+          result = await window.api.openTerminal(targetPath);
+        } catch (error) {
+          result = ipcFailure(error, 'Terminal could not be opened.');
+        }
+        if (!result?.ok) {
+          const message = result?.error || 'Terminal could not be opened.';
+          showToast('Could not open Terminal', message, { tone: 'error' });
+          log(`[cross] ${message}`, true);
+        }
+      },
+    }, ['Open terminal']),
   ]));
 }

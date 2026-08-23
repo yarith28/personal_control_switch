@@ -61,12 +61,45 @@ function classifyGitFailure(args, stdout, stderr) {
       'could not read password',
       'authentication failed',
       'permission denied (publickey)',
-      'permission denied (publickey,password)',
-      'repository not found'
+      'permission denied (publickey,password)'
     )
   ) {
     return {
       summary: 'Authentication failed. Git needed credentials, but this app cannot answer interactive prompts.',
+      raw,
+    };
+  }
+
+  if (
+    has(
+      'repository not found',
+      'requested url returned error: 401',
+      'requested url returned error: 403',
+      'the requested url returned error: 401',
+      'the requested url returned error: 403',
+      'write access to repository not granted',
+      'access denied'
+    )
+  ) {
+    return {
+      code: 'REMOTE_ACCESS_DENIED',
+      summary: 'The remote repository was not found or this account does not have access to it.',
+      raw,
+    };
+  }
+
+  if (
+    has(
+      'ssl certificate problem',
+      'certificate verify failed',
+      'server certificate verification failed',
+      'unable to get local issuer certificate',
+      'schannel: next initializesecuritycontext failed'
+    )
+  ) {
+    return {
+      code: 'TLS_CERTIFICATE_FAILED',
+      summary: 'Git could not verify the remote server certificate. Check the certificate, system clock, or HTTPS proxy.',
       raw,
     };
   }
@@ -98,8 +131,25 @@ function classifyGitFailure(args, stdout, stderr) {
   }
 
   if (
+    command === 'push'
+    && has(
+      'remote rejected',
+      'hook declined',
+      'protected branch',
+      'pre-receive hook declined',
+      'deny updating a hidden ref'
+    )
+  ) {
+    return {
+      code: 'PUSH_REMOTE_REJECTED',
+      summary: 'The remote rejected this push because of a repository policy or server hook.',
+      raw,
+    };
+  }
+
+  if (
     command === 'push' &&
-    has('non-fast-forward', 'fetch first', 'failed to push some refs', '[rejected]')
+    has('non-fast-forward', 'fetch first', 'stale info')
   ) {
     return {
       summary: 'Push was rejected because the remote has newer commits.',
@@ -279,6 +329,7 @@ function createGitService({
         if (spawnError && !stderr) stderr = spawnError.message;
         resolve(finalizeGitResult(args, {
           ok: code === 0 && !terminationReason && !spawnError,
+          exitCode: Number.isInteger(code) ? code : null,
           stdout,
           stderr,
           liveOutput,

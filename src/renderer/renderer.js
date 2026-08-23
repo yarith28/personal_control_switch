@@ -1,4 +1,4 @@
-import { log } from './js/log.js'; // registers error/unhandledrejection handlers
+import { log, logDetails } from './js/log.js'; // registers error/unhandledrejection handlers
 import {
   addBtn, fetchAllBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
   multiSelectBtn, organizeBtn, addFolderBtn, collapseBtn, helpToggleBtn,
@@ -238,7 +238,19 @@ projectSearchInput?.addEventListener('keydown', (event) => {
   subscribeGitProgress();
   setupAutoRefresh();
 
-  const config = await window.api.loadConfig();
+  let config;
+  try {
+    config = await window.api.loadConfig();
+  } catch (error) {
+    const detail = error?.message || String(error);
+    showToast(
+      'Configuration could not be opened',
+      'Git Sync stopped before loading projects so it would not overwrite an inaccessible configuration. Check the file permissions, then restart the app.',
+      { tone: 'error', duration: 15000 }
+    );
+    logDetails('[config] configuration could not be opened', detail);
+    return;
+  }
   if (config.configRecovery) {
     showToast(
       config.configRecovery.title,

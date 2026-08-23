@@ -4,8 +4,6 @@ import { persist } from './persist.js';
 import { renderProjects, syncCollapseBtn } from './render-list.js';
 import {
   fetchFolderProjects,
-  pullFolderProjects,
-  pushFolderProjects,
   updateBatchButtons,
 } from './actions.js';
 import { checkboxIconMarkup, dragHandleIconMarkup, iconHtml } from './icons.js';
@@ -142,7 +140,7 @@ export function renderFolderHeader(folder) {
   folderActions.className = 'folder-actions';
   let folderActionPending = false;
 
-  const createFolderAction = ({ action, iconName, run, confirmation = '' }) => {
+  const createFolderAction = ({ action, iconName, run }) => {
     const button = document.createElement('button');
     button.className = `folder-action-btn folder-${action.toLowerCase()}-btn`;
     button.type = 'button';
@@ -162,15 +160,6 @@ export function renderFolderHeader(folder) {
 
       folderActionPending = true;
       try {
-        if (confirmation) {
-          const confirmed = await confirmDialog({
-            message: `${action} all projects in "${folder.name}"?`,
-            detail: confirmation,
-            confirmText: `${action} all`,
-            danger: false,
-          });
-          if (!confirmed) return;
-        }
         await withButtonLoading(button, run);
       } finally {
         folderActionPending = false;
@@ -184,18 +173,6 @@ export function renderFolderHeader(folder) {
     action: 'Fetch',
     iconName: 'arrowDownUp',
     run: () => fetchFolderProjects(folder),
-  });
-  createFolderAction({
-    action: 'Pull',
-    iconName: 'arrowDown',
-    run: () => pullFolderProjects(folder),
-    confirmation: `This runs Git pull in ${actionableCount} project${actionableCount === 1 ? '' : 's'}. Local branches may be updated, and conflicts may require manual resolution.`,
-  });
-  createFolderAction({
-    action: 'Push',
-    iconName: 'arrowUp',
-    run: () => pushFolderProjects(folder),
-    confirmation: `This runs Git push in ${actionableCount} project${actionableCount === 1 ? '' : 's'} and updates their configured remotes.`,
   });
 
   // color marker (edit mode only)

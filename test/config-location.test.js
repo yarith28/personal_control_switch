@@ -94,3 +94,22 @@ test('an environment override wins without replacing the saved location', async 
   assert.equal((await store.reset()).ok, false);
   assert.equal(JSON.parse(await fs.readFile(pointerPath, 'utf8')).configPath, selectedPath);
 });
+
+test('configuration selection reports access denied separately from invalid JSON', async () => {
+  const defaultConfigPath = '/settings/default.json';
+  const pointerPath = '/settings/location.json';
+  const candidatePath = '/shared/team.json';
+  const fsApi = {
+    ...fs,
+    async readFile(filePath) {
+      const error = new Error('permission denied');
+      error.code = filePath === pointerPath ? 'ENOENT' : 'EACCES';
+      throw error;
+    },
+  };
+  const store = createConfigLocationStore({ defaultConfigPath, pointerPath, fsApi });
+  const result = await store.setPath(candidatePath);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /permission/i);
+  assert.doesNotMatch(result.error, /json/i);
+});

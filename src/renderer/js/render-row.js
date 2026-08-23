@@ -9,6 +9,7 @@ import {
   doPush,
   doForcePush,
   doFetch,
+  doFixPermissions,
   doQuickCommit,
   removeProject,
   updateBatchButtons,
@@ -94,7 +95,11 @@ export function renderRow(project, parentFolder = null) {
   const row = document.createElement('div');
   row.className = 'project-row' + (project.missing ? ' missing' : '');
   row.dataset.path = project.path;
-  row.title = project.missing ? project.path + ' — folder not found' : project.path;
+  row.title = project.missing
+    ? project.path + ' — folder not found'
+    : project.error
+      ? `${project.path} — ${project.error}`
+      : project.path;
   row.draggable = state.organizeMode;
 
   // drag handle (visual affordance only — drag works from anywhere on the row in organize mode)
@@ -305,9 +310,16 @@ export function renderRow(project, parentFolder = null) {
   fullPath.title = project.path;
   const operationStatus = document.createElement('div');
   operationStatus.className = 'operation-status';
-  operationStatus.textContent = project.statusText || '';
-  operationStatus.hidden = !project.statusText;
-  operationStatus.classList.toggle('warning', !!project.statusWarning);
+  const visibleStatus = project.statusText || project.error || '';
+  operationStatus.textContent = visibleStatus;
+  operationStatus.hidden = !visibleStatus;
+  operationStatus.title = project.statusText
+    ? project.statusText
+    : (project.rawError || project.error || '');
+  operationStatus.classList.toggle(
+    'warning',
+    !!project.statusWarning || (!project.statusText && !!project.error)
+  );
   info.appendChild(name);
   info.appendChild(fullPath);
   info.appendChild(operationStatus);
@@ -360,6 +372,17 @@ export function renderRow(project, parentFolder = null) {
   commitBtn.disabled = !project.branches || !project.uncommitted;
   commitBtn.addEventListener('click', () => doQuickCommit(project));
 
+  const permissionsBtn = document.createElement('button');
+  permissionsBtn.className = 'btn btn-permissions';
+  permissionsBtn.type = 'button';
+  permissionsBtn.title = 'Fix shared permissions';
+  permissionsBtn.setAttribute('aria-label', `Fix shared permissions for ${basename(project.path)}`);
+  permissionsBtn.innerHTML = iconHtml('wrench', { size: 11, strokeWidth: 1.8 });
+  permissionsBtn.disabled = !!project.missing;
+  permissionsBtn.addEventListener('click', () => (
+    withButtonLoading(permissionsBtn, () => doFixPermissions(project))
+  ));
+
   const cancelBtn = document.createElement('button');
   cancelBtn.className = 'btn btn-cancel';
   cancelBtn.type = 'button';
@@ -380,10 +403,11 @@ export function renderRow(project, parentFolder = null) {
     }
   });
 
+  btnRow.appendChild(cancelBtn);
   btnRow.appendChild(pullBtn);
   btnRow.appendChild(pushBtn);
   btnRow.appendChild(commitBtn);
-  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(permissionsBtn);
 
 const moveBtn = document.createElement('button');
   moveBtn.type = 'button';

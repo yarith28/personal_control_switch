@@ -7,6 +7,7 @@ const { promisify } = require('node:util');
 const { createGitService, combinedGitOutput } = require('./git-process');
 const { createConfigStore } = require('./config-store');
 const { createConfigLocationStore } = require('./config-location');
+const { fixSharedPermissions } = require('./permission-fix');
 
 function installApplicationMenu() {
   if (process.platform !== 'darwin') {
@@ -33,6 +34,23 @@ function installApplicationMenu() {
 }
 
 const execFileP = promisify(execFile);
+
+function spawnDetachedCommand(command, args, options) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, { ...options, detached: true, stdio: 'ignore' });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
 const {
   runGit,
   runGitWithInput,
@@ -478,7 +496,7 @@ async function currentBranch(repoPath) {
     return {
       ok: false,
       errorCode: 'DETACHED_HEAD',
-      errorSummary: 'Check out a local branch before using an app remote.',
+      errorSummary: 'Check out a local branch before fetching, pulling, or pushing.',
       errorRaw: '',
     };
   }
@@ -647,19 +665,20 @@ async function openInFileManager(repoPath) {
 async function openInTerminal(repoPath) {
   try {
     if (process.platform === 'win32') {
-      const child = spawn('cmd.exe', ['/c', 'start', 'cmd.exe'], {
-        cwd: repoPath, detached: true, stdio: 'ignore',
-      });
-      child.unref();
+      await spawnDetachedCommand('cmd.exe', ['/c', 'start', 'cmd.exe'], { cwd: repoPath });
     } else if (process.platform === 'darwin') {
-      execFile('open', ['-a', 'Terminal', repoPath]);
+      await execFileP('open', ['-a', 'Terminal', repoPath]);
     } else {
+      let lastError = null;
       for (const t of ['gnome-terminal', 'konsole', 'xfce4-terminal', 'x-terminal-emulator', 'xterm']) {
-        const ch = spawn(t, [], { cwd: repoPath, detached: true, stdio: 'ignore' });
-        ch.on('error', () => {});
-        ch.unref();
-        break;
+        try {
+          await spawnDetachedCommand(t, [], { cwd: repoPath });
+          return { ok: true };
+        } catch (error) {
+          lastError = error;
+        }
       }
+      return { ok: false, error: lastError?.message || 'No supported terminal application was found.' };
     }
     return { ok: true };
   } catch (err) {
@@ -675,12 +694,9 @@ async function openWithApp(repoPath, appName, linuxCommand = null) {
     }
 
     if (process.platform === 'win32') {
-      const child = spawn('cmd.exe', ['/c', 'start', '', appName, repoPath], {
-        detached: true,
-        stdio: 'ignore',
+      await spawnDetachedCommand('cmd.exe', ['/c', 'start', '', appName, repoPath], {
         windowsHide: true,
       });
-      child.unref();
       return { ok: true };
     }
 
@@ -688,11 +704,7 @@ async function openWithApp(repoPath, appName, linuxCommand = null) {
       return { ok: false, error: `${appName} is not supported on this platform` };
     }
 
-    const child = spawn(linuxCommand, [repoPath], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
+    await spawnDetachedCommand(linuxCommand, [repoPath], {});
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -776,8 +788,24 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   try {
     const st = await fs.stat(repoPath);
     if (!st.isDirectory()) return { ok: false, error: 'Folder not found', missing: true };
-  } catch {
-    return { ok: false, error: 'Folder not found', missing: true };
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+      return { ok: false, error: 'Folder not found', missing: true };
+    }
+    if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+      return {
+        ok: false,
+        error: 'Permission denied while inspecting this folder. Use Fix Permissions or update its macOS access rights.',
+        errorCode: 'FILE_PERMISSION_DENIED',
+        rawError: error.message,
+      };
+    }
+    return {
+      ok: false,
+      error: `Could not inspect this folder: ${error?.message || 'Unknown filesystem error.'}`,
+      errorCode: error?.code || 'FILESYSTEM_ERROR',
+      rawError: error?.message || '',
+    };
   }
 
   const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
@@ -796,14 +824,37 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
     ['branch', '--list', '--format=%(refname:short)'],
     repoPath
   );
-  if (!branches.ok) return { ok: false, error: branches.stderr };
+  if (!branches.ok) {
+    return {
+      ok: false,
+      error: branches.errorSummary || 'Could not read local branches.',
+      errorCode: branches.errorCode || '',
+      rawError: branches.errorRaw || '',
+    };
+  }
 
   const remoteBranches = await runGit(
     ['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes'],
     repoPath
   );
+  if (!remoteBranches.ok) {
+    return {
+      ok: false,
+      error: remoteBranches.errorSummary || 'Could not read remote branches.',
+      errorCode: remoteBranches.errorCode || '',
+      rawError: remoteBranches.errorRaw || '',
+    };
+  }
 
   const current = await runGit(['branch', '--show-current'], repoPath);
+  if (!current.ok) {
+    return {
+      ok: false,
+      error: current.errorSummary || 'Could not read the current branch.',
+      errorCode: current.errorCode || '',
+      rawError: current.errorRaw || '',
+    };
+  }
   const upstream = await runGit(
     ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
     repoPath
@@ -819,7 +870,15 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
     ? configuredRemoteResult.stdout.trim()
     : null;
   const gitRemotesResult = await listGitRemotes(repoPath);
-  const gitRemotes = gitRemotesResult.ok ? gitRemotesResult.remotes : [];
+  if (!gitRemotesResult.ok) {
+    return {
+      ok: false,
+      error: gitRemotesResult.errorSummary || 'Could not read repository remotes.',
+      errorCode: gitRemotesResult.errorCode || '',
+      rawError: gitRemotesResult.errorRaw || '',
+    };
+  }
+  const gitRemotes = gitRemotesResult.remotes;
   const remoteNames = gitRemotes.map((remote) => remote.name);
   const configuredRemote = remoteNames.includes(configuredRemoteName)
     ? configuredRemoteName
@@ -843,20 +902,24 @@ ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
     ? await runGit(['rev-list', '--count', `HEAD..${comparisonRef}`], repoPath)
     : null;
   const status  = await runGit(['status', '--porcelain'], repoPath);
-  const uncommitted = status.ok
-    ? status.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length
-    : 0;
+  if (!status.ok) {
+    return {
+      ok: false,
+      error: status.errorSummary || 'Could not inspect working-tree changes.',
+      errorCode: status.errorCode || '',
+      rawError: status.errorRaw || '',
+    };
+  }
+  const uncommitted = status.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length;
 
   return {
     ok: true,
     branches: branches.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
-    remoteBranches: remoteBranches.ok
-      ? remoteBranches.stdout
-          .split('\n')
-          .map((line) => line.split('\t'))
-          .filter(([name, symref]) => name?.trim() && !symref?.trim())
-          .map(([name]) => name.trim())
-      : [],
+    remoteBranches: remoteBranches.stdout
+      .split('\n')
+      .map((line) => line.split('\t'))
+      .filter(([name, symref]) => name?.trim() && !symref?.trim())
+      .map(([name]) => name.trim()),
     gitRemotes,
     current:  currentName,
     hasUpstream: upstream.ok,
@@ -1042,7 +1105,7 @@ ipcMain.handle('git-commit-all', async (_, repoPath, message, amend = false) => 
     previousMessage = messageResult.stdout.replace(/\n+$/, '');
   }
   const add = await runGit(['add', '-A'], repoPath);
-  if (!add.ok) return { ok: false, stdout: add.stdout, stderr: add.stderr };
+  if (!add.ok) return add;
   if (amend) {
     const messageLines = previousMessage.split('\n');
     messageLines[0] = message || messageLines[0] || 'Quick commit';
@@ -1242,7 +1305,18 @@ ipcMain.handle('push', async (event, repoPath, appRemoteValue = null) => {
       (payload) => sendGitProgress(event, repoPath, payload)
     );
     if (result.ok) {
-      await runGit(['update-ref', appRemoteRef(appRemoteResult.remote.id, branchResult.branch), 'HEAD'], repoPath);
+      const updatedRef = await runGit(
+        ['update-ref', appRemoteRef(appRemoteResult.remote.id, branchResult.branch), 'HEAD'],
+        repoPath
+      );
+      if (!updatedRef.ok) {
+        return {
+          ...updatedRef,
+          partialSuccess: true,
+          errorSummary: 'The push succeeded, but Git Sync could not update its local comparison reference.',
+          errorRaw: updatedRef.errorRaw,
+        };
+      }
     }
     return result;
   }
@@ -1255,7 +1329,9 @@ ipcMain.handle('test-app-remote', async (_, repoPath, appRemoteValue) => {
   const appRemoteResult = resolveAppRemote(appRemoteValue);
   if (!appRemoteResult.ok || !appRemoteResult.remote) return appRemoteResult;
   const result = await runGit(['ls-remote', '--heads', '--', appRemoteResult.remote.url], repoPath);
-  if (!result.ok) result.errorSummary = `Could not connect to ${appRemoteResult.remote.name}.`;
+  if (!result.ok) {
+    result.errorSummary = `${appRemoteResult.remote.name}: ${result.errorSummary || 'Connection test failed.'}`;
+  }
   return result;
 });
 
@@ -1466,7 +1542,7 @@ async function readProjectGitIdentity(repoPath) {
   if (!check.ok) {
     return {
       ok: false,
-      error: 'The selected folder is not a Git repository.',
+      error: check.errorSummary || 'Could not inspect the selected Git repository.',
       raw: check.errorRaw,
     };
   }
@@ -1586,7 +1662,13 @@ function parseCommitHistory(stdout) {
 async function commitToolHistory(repoPath, requestedLimit = 100) {
   const limit = Math.min(1000, Math.max(100, Math.trunc(Number(requestedLimit)) || 100));
   const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
-  if (!check.ok) return { ok: false, error: 'This project is not a Git repository.' };
+  if (!check.ok) {
+    return {
+      ok: false,
+      error: check.errorSummary || 'Could not inspect this Git repository.',
+      raw: check.errorRaw,
+    };
+  }
 
   const [branch, status, logResult, totalResult, signingKey, signingDefault, signingFormat] = await Promise.all([
     runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoPath),
@@ -1606,13 +1688,20 @@ async function commitToolHistory(repoPath, requestedLimit = 100) {
     const emptyRepo = /does not have any commits|unknown revision|bad revision/i.test(logResult.errorRaw || '');
     if (!emptyRepo) return { ok: false, error: logResult.errorSummary || 'Could not read commit history.', raw: logResult.errorRaw };
   }
+  if (!status.ok) {
+    return {
+      ok: false,
+      error: status.errorSummary || 'Could not inspect the working tree.',
+      raw: status.errorRaw,
+    };
+  }
 
   return {
     ok: true,
     branch: branch.ok ? branch.stdout.trim() : '',
     detached: !branch.ok,
-    dirty: status.ok && Boolean(status.stdout.trim()),
-    changedCount: status.ok ? status.stdout.split('\n').filter(Boolean).length : 0,
+    dirty: Boolean(status.stdout.trim()),
+    changedCount: status.stdout.split('\n').filter(Boolean).length,
     commits: logResult.ok ? parseCommitHistory(logResult.stdout) : [],
     totalCount: totalResult.ok ? Number.parseInt(totalResult.stdout.trim(), 10) || 0 : 0,
     limit,
@@ -1731,7 +1820,16 @@ async function rewriteCommitMetadata({
     if (target.parents.length > 1) return { ok: false, error: 'Merge commits are not supported by the Commit Tool.' };
 
     const ancestor = await runGit(['merge-base', '--is-ancestor', target.sha, oldHead], repoPath);
-    if (!ancestor.ok) return { ok: false, error: 'The selected commit is not an ancestor of the current branch.' };
+    if (!ancestor.ok) {
+      if (ancestor.exitCode === 1) {
+        return { ok: false, error: 'The selected commit is not an ancestor of the current branch.' };
+      }
+      return {
+        ok: false,
+        error: ancestor.errorSummary || 'Could not verify the selected commit ancestry.',
+        raw: ancestor.errorRaw,
+      };
+    }
 
     let chainShas;
     if (target.parents.length === 0) {
@@ -1955,11 +2053,6 @@ function crossDetectConflict(result) {
   return /conflict|automatic merge failed|after resolving the conflicts/.test(text);
 }
 
-async function crossIsRepo(repoPath) {
-  const res = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
-  return res.ok;
-}
-
 function crossCreateTempRef() {
   crossTempRefCounter += 1;
   return `refs/personal-control-switch/cross-sync/${process.pid}-${Date.now()}-${crossTempRefCounter}`;
@@ -1989,14 +2082,22 @@ async function crossReadCommits(targetPath, range) {
     ['log', `--pretty=format:%H${CROSS_FIELD_SEP}%s${CROSS_RECORD_SEP}`, range],
     targetPath
   );
-  return res.ok ? parseCommitLog(res.stdout) : [];
+  if (!res.ok) return res;
+  return { ok: true, commits: parseCommitLog(res.stdout) };
 }
 
 // Reject dirty working trees and put the target on the branch we're about to
 // change, so merge/cherry-pick act on a known, clean state.
 async function crossPrepareTarget(targetPath, targetBranch) {
   const dirty = await runGit(['status', '--porcelain'], targetPath);
-  if (dirty.ok && dirty.stdout.trim()) {
+  if (!dirty.ok) {
+    return {
+      ok: false,
+      error: dirty.errorSummary || 'Could not inspect the target working tree.',
+      raw: dirty.errorRaw,
+    };
+  }
+  if (dirty.stdout.trim()) {
     return { ok: false, error: 'The target repo has uncommitted changes. Commit or stash them first.' };
   }
   const checkout = await runGit(['checkout', targetBranch], targetPath);
@@ -2018,18 +2119,57 @@ async function crossCompare({ sourcePath, sourceBranch, targetPath, targetBranch
   if (!sourceBranch || !targetBranch) {
     return { ok: false, error: 'Pick a branch on each side first.' };
   }
-  if (!(await crossIsRepo(sourcePath)) || !(await crossIsRepo(targetPath))) {
-    return { ok: false, error: 'One of the linked folders is not a Git repository.' };
+  const sourceCheck = await runGit(['rev-parse', '--is-inside-work-tree'], sourcePath);
+  if (!sourceCheck.ok) {
+    return {
+      ok: false,
+      error: sourceCheck.errorSummary || 'Could not inspect the source repository.',
+      raw: sourceCheck.errorRaw,
+    };
+  }
+  const targetCheck = await runGit(['rev-parse', '--is-inside-work-tree'], targetPath);
+  if (!targetCheck.ok) {
+    return {
+      ok: false,
+      error: targetCheck.errorSummary || 'Could not inspect the target repository.',
+      raw: targetCheck.errorRaw,
+    };
   }
   const fetched = await crossFetchSourceTip(targetPath, sourcePath, sourceBranch);
   if (!fetched.ok) {
     return { ok: false, error: fetched.errorSummary || 'Could not read the source repository.', raw: fetched.errorRaw };
   }
   try {
-    const incoming = await crossReadCommits(targetPath, `${targetBranch}..${fetched.ref}`);
-    const outgoing = await crossReadCommits(targetPath, `${fetched.ref}..${targetBranch}`);
+    const incomingResult = await crossReadCommits(targetPath, `${targetBranch}..${fetched.ref}`);
+    if (!incomingResult.ok) {
+      return {
+        ok: false,
+        error: incomingResult.errorSummary || 'Could not compare incoming commits.',
+        raw: incomingResult.errorRaw,
+      };
+    }
+    const outgoingResult = await crossReadCommits(targetPath, `${fetched.ref}..${targetBranch}`);
+    if (!outgoingResult.ok) {
+      return {
+        ok: false,
+        error: outgoingResult.errorSummary || 'Could not compare outgoing commits.',
+        raw: outgoingResult.errorRaw,
+      };
+    }
     const base = await runGit(['merge-base', targetBranch, fetched.ref], targetPath);
-    return { ok: true, related: base.ok, incoming, outgoing };
+    if (!base.ok && base.exitCode !== 1) {
+      return {
+        ok: false,
+        error: base.errorSummary || 'Could not compare repository ancestry.',
+        raw: base.errorRaw,
+      };
+    }
+    return {
+      ok: true,
+      related: base.ok,
+      incoming: incomingResult.commits,
+      outgoing: outgoingResult.commits,
+    };
   } finally {
     await crossDeleteTempRef(targetPath, fetched.ref);
   }
@@ -2093,6 +2233,10 @@ ipcMain.handle('cross-fetch-branch', (_, payload) => crossFetchBranch(payload));
 
 ipcMain.handle('get-platform', () => process.platform);
 ipcMain.handle('get-homedir', () => require('node:os').homedir());
+
+ipcMain.handle('fix-permissions', async (_, repoPath) => {
+  return await fixSharedPermissions(repoPath);
+});
 
 ipcMain.handle('open-terminal', (_, repoPath) => {
   return openInTerminal(repoPath);

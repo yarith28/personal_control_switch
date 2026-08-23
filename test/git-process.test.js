@@ -46,6 +46,34 @@ test('Git failures receive actionable summaries', () => {
     unsafeRepository.summary,
     'Git blocked this repository because its owner is not trusted.'
   );
+
+  const protectedBranch = classifyGitFailure(
+    ['push'],
+    '',
+    [
+      'remote: error: GH006: Protected branch update failed',
+      '! [remote rejected] main -> main (protected branch hook declined)',
+      'error: failed to push some refs',
+    ].join('\n')
+  );
+  assert.equal(protectedBranch.code, 'PUSH_REMOTE_REJECTED');
+  assert.match(protectedBranch.summary, /policy or server hook/i);
+
+  const accessDenied = classifyGitFailure(
+    ['fetch'],
+    '',
+    "fatal: unable to access 'https://example.test/repo.git/': The requested URL returned error: 403"
+  );
+  assert.equal(accessDenied.code, 'REMOTE_ACCESS_DENIED');
+  assert.match(accessDenied.summary, /does not have access/i);
+
+  const certificate = classifyGitFailure(
+    ['fetch'],
+    '',
+    "fatal: unable to access 'https://example.test/repo.git/': SSL certificate problem: certificate has expired"
+  );
+  assert.equal(certificate.code, 'TLS_CERTIFICATE_FAILED');
+  assert.match(certificate.summary, /certificate/i);
 });
 
 test('the Git runner commits input and reports repository state', async (t) => {

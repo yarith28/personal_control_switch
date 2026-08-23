@@ -55,11 +55,19 @@ function createConfigLocationStore({
     try {
       parsed = JSON.parse(await fsApi.readFile(candidatePath, 'utf8'));
     } catch (error) {
+      let message = 'The selected configuration file could not be read.';
+      if (error?.code === 'ENOENT') {
+        message = 'The selected configuration file does not exist.';
+      } else if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+        message = 'You do not have permission to read the selected configuration file.';
+      } else if (error instanceof SyntaxError) {
+        message = 'The selected configuration file contains invalid JSON.';
+      } else if (error?.message) {
+        message = `The selected configuration file could not be read: ${error.message}`;
+      }
       return {
         ok: false,
-        error: error?.code === 'ENOENT'
-          ? 'The selected configuration file does not exist.'
-          : 'The selected file is not readable JSON.',
+        error: message,
       };
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

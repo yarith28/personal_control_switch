@@ -29,6 +29,10 @@ function corruptPathFor(configPath, timestamp) {
   return `${base}.corrupt-${safeTimestamp}${extension || '.json'}`;
 }
 
+function isRecoverableConfigReadError(error) {
+  return error?.code === 'ENOENT' || error instanceof SyntaxError;
+}
+
 function createConfigStore({
   getConfigPath,
   fsApi = fs,
@@ -51,8 +55,9 @@ function createConfigStore({
     try {
       await readJson(filePath);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isRecoverableConfigReadError(error)) return false;
+      throw error;
     }
   }
 
@@ -90,9 +95,24 @@ function createConfigStore({
       // can still continue from a known-good backup.
     }
 
+    let recovered;
     try {
-      const recovered = await readJson(backupPath);
-      await atomicWrite(recovered, { preserveCurrent: false });
+      recovered = await readJson(backupPath);
+    } catch (error) {
+      if (!isRecoverableConfigReadError(error)) throw error;
+    }
+
+    if (recovered) {
+      try {
+        await atomicWrite(recovered, { preserveCurrent: false });
+      } catch (error) {
+        pendingRecovery = {
+          title: 'Configuration could not be restored',
+          message: `The saved configuration was malformed. Its backup was readable, but Git Sync could not restore it: ${error.message}`,
+          tone: 'error',
+        };
+        return recovered;
+      }
       pendingRecovery = {
         title: 'Configuration restored',
         message: preservedPath
@@ -101,23 +121,23 @@ function createConfigStore({
         tone: 'warning',
       };
       return recovered;
-    } catch {
-      const fresh = defaultConfig();
-      try {
-        await atomicWrite(fresh, { preserveCurrent: false });
-      } catch {
-        // If the directory is not writable, preserve the original read error
-        // context in the notice and continue with an in-memory empty config.
-      }
-      pendingRecovery = {
-        title: 'Configuration could not be read',
-        message: preservedPath
-          ? `No usable backup was available. A fresh project list was opened and the damaged file was preserved at ${preservedPath}.`
-          : `No usable backup was available. A fresh project list was opened. ${originalError.message}`,
-        tone: 'error',
-      };
-      return fresh;
     }
+
+    const fresh = defaultConfig();
+    try {
+      await atomicWrite(fresh, { preserveCurrent: false });
+    } catch {
+      // If the directory is not writable, preserve the original read error
+      // context in the notice and continue with an in-memory empty config.
+    }
+    pendingRecovery = {
+      title: 'Configuration could not be read',
+      message: preservedPath
+        ? `No usable backup was available. A fresh project list was opened and the damaged file was preserved at ${preservedPath}.`
+        : `No usable backup was available. A fresh project list was opened. ${originalError.message}`,
+      tone: 'error',
+    };
+    return fresh;
   }
 
   async function load({ reportRecovery = false } = {}) {
@@ -128,8 +148,10 @@ function createConfigStore({
     } catch (error) {
       if (error?.code === 'ENOENT') {
         config = defaultConfig();
-      } else {
+      } else if (error instanceof SyntaxError) {
         config = await recoverConfig(configPath, error);
+      } else {
+        throw error;
       }
     }
 
