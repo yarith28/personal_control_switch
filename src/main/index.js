@@ -1110,12 +1110,12 @@ ipcMain.handle('git-commit-all', async (_, repoPath, message, amend = false) => 
     const messageLines = previousMessage.split('\n');
     messageLines[0] = message || messageLines[0] || 'Quick commit';
     return await runGitWithInput(
-      ['commit', '--no-verify', '--amend', '-F', '-'],
+      ['-c', 'core.hooksPath=/dev/null', 'commit', '--no-verify', '--amend', '-F', '-'],
       repoPath,
       messageLines.join('\n')
     );
   }
-  const args = ['commit', '--no-verify'];
+  const args = ['-c', 'core.hooksPath=/dev/null', 'commit', '--no-verify'];
   args.push('-m', message || 'Quick commit');
   const commit = await runGit(args, repoPath);
   return commit;

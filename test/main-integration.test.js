@@ -222,6 +222,9 @@ test('fetch, pull, push, status, and quick commit handlers work with a local rem
   const rejectingCommitHook = path.join(second, '.git', 'hooks', 'pre-commit');
   await fs.writeFile(rejectingCommitHook, '#!/bin/sh\nexit 1\n');
   await fs.chmod(rejectingCommitHook, 0o755);
+  const rejectingPrepareMessageHook = path.join(second, '.git', 'hooks', 'prepare-commit-msg');
+  await fs.writeFile(rejectingPrepareMessageHook, '#!/bin/sh\nexit 1\n');
+  await fs.chmod(rejectingPrepareMessageHook, 0o755);
   const status = await handlers.get('git-status')(null, second);
   assert.equal(status.ok, true);
   assert.equal(status.changedCount, 1);

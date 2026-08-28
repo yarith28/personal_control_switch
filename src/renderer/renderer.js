@@ -39,6 +39,19 @@ setupDragAutoScroll();
 // pops the OS window menu. Suppress the context menu to stop that.
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// Refresh repository state without reloading the renderer. This preserves the
+// current tab, filters, and UI state while re-reading branches and Git status.
+document.addEventListener('keydown', (event) => {
+  const refreshShortcut = (event.metaKey || event.ctrlKey)
+    && !event.altKey
+    && !event.shiftKey
+    && event.key.toLowerCase() === 'r';
+  if (!refreshShortcut) return;
+  event.preventDefault();
+  if (event.repeat) return;
+  void refreshAll({ force: true, source: 'shortcut' });
+});
+
 function setupAutoRefresh() {
   if (autoRefreshInitialized) return;
   autoRefreshInitialized = true;

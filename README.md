@@ -91,6 +91,7 @@ The included packaging configuration does not sign installers. Public distributi
 - App-managed remotes are stored by Git Sync, not in `.git/config`. Their selected URL is used directly for fetch and push; pull fetches that URL and only fast-forwards the matching local branch.
 - Git credential prompts are disabled inside the app so an operation cannot wait on an invisible terminal prompt. Configure credentials with your normal Git tooling.
 - Fetch, pull, and push can be cancelled from the repository row. Network operations time out after five minutes; other Git commands time out after two minutes.
+- Quick Commit bypasses repository Git hooks for both new commits and amendments.
 - Commit Tool only rewrites clean, linear local history. It creates a temporary backup branch, updates the branch with compare-and-swap semantics, verifies the result, and attempts an automatic rollback if verification fails.
 - Cross Sync refuses dirty target working trees and aborts a conflicted rebase.
 - The macOS permission repair asks for administrator approval, grants the current primary group inherited directory access within the selected repository, and marks that repository as trusted in the current user's global Git configuration. It does not install dependencies or alter commits.

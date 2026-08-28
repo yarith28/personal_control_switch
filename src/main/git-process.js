@@ -40,8 +40,33 @@ function defaultGitErrorSummary(command) {
   }
 }
 
+function gitCommand(args) {
+  const optionsWithValues = new Set([
+    '-c',
+    '-C',
+    '--attr-source',
+    '--config-env',
+    '--exec-path',
+    '--git-dir',
+    '--namespace',
+    '--super-prefix',
+    '--work-tree',
+  ]);
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = String(args[index] || '');
+    if (optionsWithValues.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) continue;
+    return argument || 'git';
+  }
+  return 'git';
+}
+
 function classifyGitFailure(args, stdout, stderr) {
-  const command = args[0] || 'git';
+  const command = gitCommand(args);
   const raw = combinedGitOutput(stdout, stderr);
   const normalized = raw.toLowerCase();
   const has = (...patterns) => patterns.some((pattern) => normalized.includes(pattern));

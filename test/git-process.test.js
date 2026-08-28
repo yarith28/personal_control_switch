@@ -84,6 +84,13 @@ test('the Git runner commits input and reports repository state', async (t) => {
   const log = await service.runGit(['log', '-1', '--format=%s'], dir);
   assert.equal(log.ok, true);
   assert.equal(log.stdout.trim(), 'Initial commit');
+
+  const noChanges = await service.runGit(
+    ['-c', 'core.hooksPath=/dev/null', 'commit', '--no-verify', '-m', 'No changes'],
+    dir
+  );
+  assert.equal(noChanges.ok, false);
+  assert.equal(noChanges.errorSummary, 'Nothing to commit.');
 });
 
 test('streaming Git operations can be cancelled', { skip: process.platform === 'win32' }, async (t) => {
