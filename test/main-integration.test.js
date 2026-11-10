@@ -52,6 +52,32 @@ test('repository checks preserve Git failure details', async (t) => {
   assert.match(result.rawError, /not a git repository/i);
 });
 
+test('repository scan discovers nested repos and avoids dependency or repository subtrees', async (t) => {
+  const root = await makeTempDir(t, 'git-sync-scan-');
+  const first = path.join(root, 'first');
+  const second = path.join(root, 'group', 'second');
+  const nested = path.join(first, 'nested');
+  const ignored = path.join(root, 'node_modules', 'ignored');
+  await fs.mkdir(first, { recursive: true });
+  await fs.mkdir(second, { recursive: true });
+  await fs.mkdir(nested, { recursive: true });
+  await fs.mkdir(ignored, { recursive: true });
+  await initRepo(first);
+  await initRepo(second);
+  await initRepo(nested);
+  await initRepo(ignored);
+
+  const result = await handlers.get('scan-git-repositories')(null, [root]);
+
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.repositories, [first, second].sort((left, right) => left.localeCompare(right)));
+  assert.equal(result.truncated, false);
+  assert.ok(result.scannedDirectories >= 3);
+
+  const direct = await handlers.get('scan-git-repositories')(null, [second]);
+  assert.deepEqual(direct.repositories, [second]);
+});
+
 test('status failures are not reported as a clean dashboard or Commit Tool state', async (t) => {
   const dir = await makeTempDir(t, 'git-sync-broken-index-');
   await initRepo(dir);
@@ -142,6 +168,335 @@ async function commitFile(dir, name, contents, message) {
   await git(dir, 'add', '-A');
   await git(dir, 'commit', '-m', message);
 }
+
+test('history preview shows current-branch commits and exact staged, unstaged, and untracked paths', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-history-preview-');
+  await initRepo(repo);
+  await commitFile(repo, 'tracked.txt', 'original\n', 'initial commit');
+  const initial = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(repo, 'checkout', '-b', 'other');
+  await commitFile(repo, 'other.txt', 'other branch\n', 'other branch only');
+  await git(repo, 'checkout', 'main');
+  await commitFile(repo, 'old name.txt', 'rename me\n', 'add file for rename');
+  await git(repo, 'mv', 'old name.txt', 'new name.txt');
+  await fs.writeFile(path.join(repo, 'tracked.txt'), 'staged\n');
+  await git(repo, 'add', 'tracked.txt');
+  await fs.writeFile(path.join(repo, 'tracked.txt'), 'unstaged\n');
+  const newPath = 'new [literal]\nfile.txt';
+  await fs.writeFile(path.join(repo, newPath), '<script>new file</script>\n');
+  const statusBefore = (await git(repo, 'status', '--porcelain=v1', '-z')).stdout;
+
+  const preview = await handlers.get('git-history-preview')(null, repo);
+  assert.equal(preview.ok, true, preview.error);
+  assert.equal(preview.branch, 'main');
+  assert.deepEqual(preview.commits.map((commit) => commit.subject), ['add file for rename', 'initial commit']);
+  const tracked = preview.changes.find((file) => file.path === 'tracked.txt');
+  assert.equal(tracked.staged, true);
+  assert.equal(tracked.unstaged, true);
+  assert.equal(preview.changes.find((file) => file.path === newPath).untracked, true);
+  assert.equal(preview.changes.find((file) => file.path === 'new name.txt').originalPath, 'old name.txt');
+
+  const staged = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: 'tracked.txt', kind: 'staged' });
+  assert.equal(staged.ok, true, staged.error);
+  assert.match(staged.patch, /\+staged/);
+  assert.doesNotMatch(staged.patch, /\+unstaged/);
+  const unstaged = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: 'tracked.txt', kind: 'unstaged' });
+  assert.match(unstaged.patch, /\+unstaged/);
+  const untracked = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: newPath, kind: 'untracked' });
+  assert.equal(untracked.patch, '<script>new file</script>\n');
+  assert.equal(untracked.plainText, true);
+
+  const root = await handlers.get('git-history-commit')(null, repo, initial);
+  assert.equal(root.ok, true, root.error);
+  assert.deepEqual(root.files.map((file) => file.path), ['tracked.txt']);
+  const rootPatch = await handlers.get('git-history-patch')(null, { repoPath: repo, commit: initial, filePath: 'tracked.txt' });
+  assert.match(rootPatch.patch, /\+original/);
+  assert.equal((await git(repo, 'status', '--porcelain=v1', '-z')).stdout, statusBefore);
+  await git(repo, 'commit', '-m', 'rename and update');
+  const renamedSha = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  const renamed = await handlers.get('git-history-commit')(null, repo, renamedSha);
+  assert.equal(renamed.files.find((file) => file.path === 'new name.txt').originalPath, 'old name.txt');
+  const renamePatch = await handlers.get('git-history-patch')(null, {
+    repoPath: repo, commit: renamedSha, filePath: 'new name.txt', originalPath: 'old name.txt',
+  });
+  assert.match(renamePatch.patch, /rename from old name.txt/);
+});
+
+test('history preview limits display to 30 commits while preserving the full repository history', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-history-limit-');
+  await initRepo(repo);
+  await commitFile(repo, 'tracked.txt', 'initial\n', 'Commit 1');
+  for (let index = 2; index <= 35; index += 1) {
+    await git(repo, 'commit', '--allow-empty', '-m', `Commit ${index}`);
+  }
+  const preview = await handlers.get('git-history-preview')(null, repo);
+  assert.equal(preview.ok, true, preview.error);
+  assert.equal(preview.commits.length, 30);
+  assert.equal(preview.totalCount, 35);
+  assert.equal(preview.commits[0].subject, 'Commit 35');
+  assert.equal(preview.commits.at(-1).subject, 'Commit 6');
+  assert.equal((await git(repo, 'rev-list', '--count', 'HEAD')).stdout.trim(), '35');
+  const commitTool = await handlers.get('commit-tool-history')(null, repo);
+  assert.equal(commitTool.ok, true, commitTool.error);
+  assert.equal(commitTool.commits.length, 35);
+});
+
+test('history preview handles unborn and detached branches and bounds new-file previews', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-history-empty-');
+  await initRepo(repo);
+  await fs.writeFile(path.join(repo, 'new.txt'), 'first file\n');
+  await git(repo, 'add', 'new.txt');
+  const unborn = await handlers.get('git-history-preview')(null, repo);
+  assert.equal(unborn.ok, true, unborn.error);
+  assert.equal(unborn.branch, 'main');
+  assert.deepEqual(unborn.commits, []);
+  assert.equal(unborn.changes[0].staged, true);
+  const staged = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: 'new.txt', kind: 'staged' });
+  assert.equal(staged.ok, true, staged.error);
+  assert.match(staged.patch, /\+first file/);
+  await git(repo, 'commit', '-m', 'initial');
+  await git(repo, 'checkout', '--detach');
+  const detached = await handlers.get('git-history-preview')(null, repo);
+  assert.equal(detached.detached, true);
+  assert.equal(detached.commits.length, 1);
+
+  await fs.writeFile(path.join(repo, 'binary.bin'), Buffer.from([0, 1, 2]));
+  const binary = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: 'binary.bin', kind: 'untracked' });
+  assert.equal(binary.binary, true);
+  await fs.writeFile(path.join(repo, 'large.txt'), 'a'.repeat(170000));
+  const large = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: 'large.txt', kind: 'untracked' });
+  assert.equal(large.truncated, true);
+  assert.equal(large.patch.length, 160000);
+  const outside = await handlers.get('git-history-patch')(null, { repoPath: repo, filePath: '../outside', kind: 'untracked' });
+  assert.equal(outside.ok, false);
+});
+
+test('history preview compares merge commits with their first parent', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-history-merge-');
+  await initRepo(repo);
+  await commitFile(repo, 'base.txt', 'base\n', 'base');
+  await git(repo, 'checkout', '-b', 'feature');
+  await commitFile(repo, 'feature.txt', 'feature\n', 'feature');
+  await git(repo, 'checkout', 'main');
+  await commitFile(repo, 'main.txt', 'main\n', 'main');
+  await git(repo, 'merge', '--no-ff', 'feature', '-m', 'merge feature');
+  const sha = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  const detail = await handlers.get('git-history-commit')(null, repo, sha);
+  assert.equal(detail.ok, true, detail.error);
+  assert.equal(detail.commit.parents.length, 2);
+  assert.deepEqual(detail.files.map((file) => file.path), ['feature.txt']);
+  const patch = await handlers.get('git-history-patch')(null, { repoPath: repo, commit: sha, filePath: 'feature.txt' });
+  assert.match(patch.patch, /\+feature/);
+});
+
+test('file-status actions stage exact files and commit staged changes only', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-file-status-');
+  await initRepo(repo);
+  await commitFile(repo, 'tracked.txt', 'base\n', 'initial');
+  const literal = 'new [file].txt';
+  await fs.writeFile(path.join(repo, literal), 'new file\n');
+  await fs.writeFile(path.join(repo, 'tracked.txt'), 'staged value\n');
+  const stage = handlers.get('git-history-set-staging');
+  const staged = await stage(null, { repoPath: repo, paths: ['tracked.txt', literal], staged: true });
+  assert.equal(staged.ok, true, staged.error);
+  const preview = await handlers.get('git-history-preview')(null, repo);
+  assert.equal(preview.ok, true, preview.error);
+  await fs.writeFile(path.join(repo, 'tracked.txt'), 'unstaged value\n');
+  const committed = await handlers.get('git-history-commit-staged')(
+    null, repo, 'Commit selected changes', preview.commitSnapshot
+  );
+  assert.equal(committed.ok, true, committed.error);
+  assert.equal((await git(repo, 'show', 'HEAD:tracked.txt')).stdout, 'staged value\n');
+  assert.equal(await fs.readFile(path.join(repo, 'tracked.txt'), 'utf8'), 'unstaged value\n');
+  assert.equal((await git(repo, 'show', `HEAD:${literal}`)).stdout, 'new file\n');
+  assert.match((await git(repo, 'status', '--porcelain')).stdout, / M tracked.txt/);
+  const empty = await handlers.get('git-history-commit-staged')(null, repo, 'Nothing staged');
+  assert.equal(empty.ok, false);
+  const invalid = await stage(null, { repoPath: repo, paths: ['../outside'], staged: true });
+  assert.equal(invalid.ok, false);
+});
+
+test('history preview refreshes status without reloading unchanged history', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-incremental-preview-');
+  await initRepo(repo);
+  await commitFile(repo, 'tracked.txt', 'initial\n', 'initial');
+  const preview = handlers.get('git-history-preview');
+  const initial = await preview(null, repo);
+  assert.equal(initial.ok, true, initial.error);
+  assert.equal(initial.commits.length, 1);
+
+  await fs.writeFile(path.join(repo, 'tracked.txt'), 'staged\n');
+  await git(repo, 'add', 'tracked.txt');
+  const staged = await preview(null, repo, initial.commitSnapshot);
+  assert.equal(staged.ok, true, staged.error);
+  assert.equal(Object.hasOwn(staged, 'commits'), false);
+  assert.equal(Object.hasOwn(staged, 'totalCount'), false);
+  assert.equal(staged.changes[0].staged, true);
+  assert.notEqual(staged.commitSnapshot.index, initial.commitSnapshot.index);
+
+  await fs.writeFile(path.join(repo, 'tracked.txt'), 'working\n');
+  const working = await preview(null, repo, staged.commitSnapshot);
+  assert.equal(working.ok, true, working.error);
+  assert.equal(Object.hasOwn(working, 'commits'), false);
+  assert.equal(working.changes[0].unstaged, true);
+  assert.deepEqual(working.commitSnapshot, staged.commitSnapshot);
+
+  const committed = await handlers.get('git-history-commit-staged')(
+    null, repo, 'Selected changes', working.commitSnapshot
+  );
+  assert.equal(committed.ok, true, committed.error);
+  const afterCommit = await preview(null, repo, working.commitSnapshot);
+  assert.equal(afterCommit.ok, true, afterCommit.error);
+  assert.equal(afterCommit.totalCount, 2);
+  assert.equal(afterCommit.commits[0].subject, 'Selected changes');
+
+  await git(repo, 'switch', '-c', 'other');
+  const afterSwitch = await preview(null, repo, afterCommit.commitSnapshot);
+  assert.equal(afterSwitch.ok, true, afterSwitch.error);
+  assert.equal(afterSwitch.branch, 'other');
+  assert.equal(afterSwitch.commits.length, 2);
+  const explicitRefresh = await preview(null, repo);
+  assert.equal(explicitRefresh.ok, true, explicitRefresh.error);
+  assert.equal(explicitRefresh.commits.length, 2);
+});
+
+test('file-status unstage preserves files before and after the first commit', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-unstage-');
+  await initRepo(repo);
+  await fs.writeFile(path.join(repo, 'new.txt'), 'original content\n');
+  const stage = handlers.get('git-history-set-staging');
+  assert.equal((await stage(null, { repoPath: repo, paths: ['new.txt'], staged: true })).ok, true);
+  const unstaged = await stage(null, { repoPath: repo, paths: ['new.txt'], staged: false });
+  assert.equal(unstaged.ok, true, unstaged.error);
+  assert.equal(await fs.readFile(path.join(repo, 'new.txt'), 'utf8'), 'original content\n');
+  assert.match((await git(repo, 'status', '--porcelain')).stdout, /\?\? new.txt/);
+  await commitFile(repo, 'new.txt', 'original content\n', 'initial');
+  await fs.writeFile(path.join(repo, 'new.txt'), 'edited content\n');
+  await stage(null, { repoPath: repo, paths: ['new.txt'], staged: true });
+  assert.equal((await stage(null, { repoPath: repo, paths: ['new.txt'], staged: false })).ok, true);
+  assert.equal(await fs.readFile(path.join(repo, 'new.txt'), 'utf8'), 'edited content\n');
+  assert.equal((await git(repo, 'diff', '--cached')).stdout, '');
+});
+
+test('file-status resolves subfolder projects to the worktree root for previews and mutations', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-subfolder-status-');
+  const subfolder = path.join(repo, 'sub');
+  await initRepo(repo);
+  await fs.mkdir(subfolder);
+  await commitFile(repo, 'shared.txt', 'root initial\n', 'root file');
+  await commitFile(repo, 'sub/shared.txt', 'nested initial\n', 'nested file');
+  const head = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  await fs.writeFile(path.join(repo, 'shared.txt'), 'root edited\n');
+  await fs.writeFile(path.join(subfolder, 'shared.txt'), 'nested edited\n');
+  await fs.writeFile(path.join(repo, 'new.txt'), 'root untracked\n');
+  await fs.writeFile(path.join(subfolder, 'new.txt'), 'nested untracked\n');
+
+  const preview = await handlers.get('git-history-preview')(null, subfolder);
+  assert.equal(preview.ok, true, preview.error);
+  assert.deepEqual(preview.changes.map((file) => file.path).sort(), [
+    'new.txt', 'shared.txt', 'sub/new.txt', 'sub/shared.txt',
+  ]);
+  const patch = await handlers.get('git-history-patch')(null, {
+    repoPath: subfolder, filePath: 'shared.txt', kind: 'unstaged',
+  });
+  assert.equal(patch.ok, true, patch.error);
+  assert.match(patch.patch, /\+root edited/);
+  assert.doesNotMatch(patch.patch, /nested edited/);
+  const untracked = await handlers.get('git-history-patch')(null, {
+    repoPath: subfolder, filePath: 'new.txt', kind: 'untracked',
+  });
+  assert.equal(untracked.patch, 'root untracked\n');
+  const detail = await handlers.get('git-history-commit')(null, subfolder, head);
+  assert.equal(detail.ok, true, detail.error);
+  assert.deepEqual(detail.files.map((file) => file.path), ['sub/shared.txt']);
+  const committedPatch = await handlers.get('git-history-patch')(null, {
+    repoPath: subfolder, filePath: 'sub/shared.txt', commit: head,
+  });
+  assert.match(committedPatch.patch, /\+nested initial/);
+
+  const stage = handlers.get('git-history-set-staging');
+  assert.equal((await stage(null, { repoPath: subfolder, paths: ['shared.txt'], staged: true })).ok, true);
+  assert.equal((await git(repo, 'diff', '--cached', '--name-only')).stdout.trim(), 'shared.txt');
+  assert.equal((await stage(null, { repoPath: subfolder, paths: ['shared.txt'], staged: false })).ok, true);
+  assert.equal((await git(repo, 'diff', '--cached')).stdout, '');
+  assert.equal((await stage(null, { repoPath: subfolder, paths: ['shared.txt'], staged: true })).ok, true);
+  const stagedPreview = await handlers.get('git-history-preview')(null, subfolder);
+  const result = await handlers.get('git-history-commit-staged')(
+    null, subfolder, 'Commit root file', stagedPreview.commitSnapshot
+  );
+  assert.equal(result.ok, true, result.error);
+  assert.equal((await git(repo, 'show', 'HEAD:shared.txt')).stdout, 'root edited\n');
+  assert.equal((await git(repo, 'show', 'HEAD:sub/shared.txt')).stdout, 'nested initial\n');
+});
+
+test('file-status rejects stale branch, HEAD, and staged-content snapshots', async (t) => {
+  const scenarios = [
+    ['branch switch with the same HEAD and index', async (repo) => {
+      await git(repo, 'switch', '-c', 'other');
+    }],
+    ['detached HEAD with the same commit and index', async (repo) => {
+      await git(repo, 'checkout', '--detach');
+    }],
+    ['another staged file', async (repo) => {
+      await fs.writeFile(path.join(repo, 'extra.txt'), 'unreviewed\n');
+      await git(repo, 'add', 'extra.txt');
+    }],
+    ['different staged content at the same path', async (repo) => {
+      await fs.writeFile(path.join(repo, 'tracked.txt'), 'unreviewed replacement\n');
+      await git(repo, 'add', 'tracked.txt');
+    }],
+    ['HEAD update with the same branch and index', async (repo) => {
+      const head = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+      const tree = (await git(repo, 'rev-parse', 'HEAD^{tree}')).stdout.trim();
+      const next = (await git(repo, 'commit-tree', tree, '-p', head, '-m', 'External empty commit')).stdout.trim();
+      await git(repo, 'update-ref', 'HEAD', next, head);
+    }],
+  ];
+  for (const [name, change] of scenarios) {
+    await t.test(name, async (t) => {
+      const repo = await makeTempDir(t, 'git-sync-stale-status-');
+      await initRepo(repo);
+      await commitFile(repo, 'tracked.txt', 'initial\n', 'initial');
+      await fs.writeFile(path.join(repo, 'tracked.txt'), 'reviewed\n');
+      await git(repo, 'add', 'tracked.txt');
+      const preview = await handlers.get('git-history-preview')(null, repo);
+      assert.equal(preview.ok, true, preview.error);
+      await change(repo);
+      const headBefore = (await git(repo, 'rev-parse', 'HEAD')).stdout;
+      const indexBefore = (await git(repo, 'ls-files', '--stage', '-z')).stdout;
+      const result = await handlers.get('git-history-commit-staged')(
+        null, repo, 'Commit reviewed changes', preview.commitSnapshot
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.code, 'HISTORY_STATE_CHANGED');
+      assert.equal((await git(repo, 'rev-parse', 'HEAD')).stdout, headBefore);
+      assert.equal((await git(repo, 'ls-files', '--stage', '-z')).stdout, indexBefore);
+      const refreshed = await handlers.get('git-history-preview')(null, repo);
+      const retry = await handlers.get('git-history-commit-staged')(
+        null, repo, 'Commit refreshed changes', refreshed.commitSnapshot
+      );
+      assert.equal(retry.ok, true, retry.error);
+    });
+  }
+});
+
+test('file-status requires a snapshot and supports the first commit on an unborn branch', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-first-status-commit-');
+  await initRepo(repo);
+  await fs.writeFile(path.join(repo, 'first.txt'), 'first\n');
+  await git(repo, 'add', 'first.txt');
+  const commit = handlers.get('git-history-commit-staged');
+  const missing = await commit(null, repo, 'Missing snapshot');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'HISTORY_STATE_CHANGED');
+  const preview = await handlers.get('git-history-preview')(null, repo);
+  assert.equal(preview.ok, true, preview.error);
+  assert.equal(preview.commitSnapshot.head, '');
+  assert.equal(preview.commitSnapshot.ref, 'refs/heads/main');
+  const initial = await commit(null, repo, 'Initial commit', preview.commitSnapshot);
+  assert.equal(initial.ok, true, initial.error);
+  assert.equal((await git(repo, 'show', 'HEAD:first.txt')).stdout, 'first\n');
+});
 
 test('fetch, pull, push, status, and quick commit handlers work with a local remote', async (t) => {
   const root = await makeTempDir(t, 'git-sync-ipc-');
@@ -714,5 +1069,79 @@ test('Commit Tool rewrites metadata and cleans up its temporary backup branch', 
   assert.equal((await git(repo, 'log', '-1', '--format=%s')).stdout.trim(), 'new subject');
   const branches = (await git(repo, 'branch', '--list', 'pcs-backup-*')).stdout.trim();
   assert.equal(branches, '');
+  assert.equal((await git(repo, 'status', '--porcelain')).stdout.trim(), '');
+});
+
+test('Commit Tool preserves merge topology while rewriting identities and merge metadata', async (t) => {
+  const repo = await makeTempDir(t, 'git-sync-merge-rewrite-');
+  const globalConfig = path.join(repo, 'test-global.gitconfig');
+  const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = globalConfig;
+  t.after(() => {
+    if (previousGlobalConfig == null) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
+  });
+  await fs.writeFile(globalConfig, '[user]\n\tname = Rewritten User\n\temail = rewritten@example.com\n');
+
+  await initRepo(repo);
+  await commitFile(repo, 'base.txt', 'base\n', 'base');
+  const base = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(repo, 'branch', 'feature');
+
+  await commitFile(repo, 'main.txt', 'main\n', 'main work');
+  const oldMain = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(repo, 'checkout', 'feature');
+  await commitFile(repo, 'feature.txt', 'feature\n', 'feature work');
+  const oldFeature = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(repo, 'checkout', 'main');
+  await git(repo, 'merge', '--no-ff', 'feature', '-m', 'merge feature');
+  await commitFile(repo, 'after.txt', 'after\n', 'after merge');
+  const oldHead = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  const oldTree = (await git(repo, 'rev-parse', `${oldHead}^{tree}`)).stdout.trim();
+
+  const batchResult = await handlers.get('commit-tool-rewrite')(null, {
+    repoPath: repo,
+    commit: oldMain,
+    commits: [oldMain, oldFeature],
+    authorMode: 'global',
+    authorDateMode: 'preserve',
+    committerMode: 'preserve',
+    reSign: false,
+  });
+
+  assert.equal(batchResult.ok, true, batchResult.error);
+  assert.equal(batchResult.rewrittenCount, 4);
+  assert.equal((await git(repo, 'rev-parse', 'HEAD^{tree}')).stdout.trim(), oldTree);
+
+  const rewrittenMain = (await git(repo, 'log', '--format=%H', '--grep=^main work$')).stdout.trim();
+  const rewrittenFeature = (await git(repo, 'log', '--format=%H', '--grep=^feature work$')).stdout.trim();
+  const rewrittenMerge = (await git(repo, 'log', '--format=%H', '--grep=^merge feature$')).stdout.trim();
+  assert.equal((await git(repo, 'show', '-s', '--format=%an <%ae>', rewrittenMain)).stdout.trim(), 'Rewritten User <rewritten@example.com>');
+  assert.equal((await git(repo, 'show', '-s', '--format=%an <%ae>', rewrittenFeature)).stdout.trim(), 'Rewritten User <rewritten@example.com>');
+  assert.deepEqual(
+    (await git(repo, 'show', '-s', '--format=%P', rewrittenMerge)).stdout.trim().split(' '),
+    [rewrittenMain, rewrittenFeature]
+  );
+  assert.equal((await git(repo, 'show', '-s', '--format=%P', rewrittenMain)).stdout.trim(), base);
+  assert.equal((await git(repo, 'show', '-s', '--format=%P', rewrittenFeature)).stdout.trim(), base);
+
+  const mergeResult = await handlers.get('commit-tool-rewrite')(null, {
+    repoPath: repo,
+    commit: rewrittenMerge,
+    message: 'renamed merge',
+    authorMode: 'preserve',
+    authorDateMode: 'preserve',
+    committerMode: 'preserve',
+    reSign: false,
+  });
+
+  assert.equal(mergeResult.ok, true, mergeResult.error);
+  assert.equal(mergeResult.rewrittenCount, 2);
+  const renamedMerge = (await git(repo, 'log', '--format=%H', '--grep=^renamed merge$')).stdout.trim();
+  assert.deepEqual(
+    (await git(repo, 'show', '-s', '--format=%P', renamedMerge)).stdout.trim().split(' '),
+    [rewrittenMain, rewrittenFeature]
+  );
+  assert.equal((await git(repo, 'branch', '--list', 'pcs-backup-*')).stdout.trim(), '');
   assert.equal((await git(repo, 'status', '--porcelain')).stdout.trim(), '');
 });

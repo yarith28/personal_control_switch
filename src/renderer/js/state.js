@@ -4,6 +4,7 @@ export const state = {
   multiSelect: false,
   organizeMode: false,
   currentTheme: null,
+  darkMode: false,
   currentFont: null,
   compactMode: false,
   burstMode: true,

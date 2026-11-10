@@ -21,6 +21,7 @@ import { createProjectOpenMenu } from './project-open-menu.js';
 import { showToast } from './notify.js';
 import { startDragAutoScroll, stopDragAutoScroll } from './drag-auto-scroll.js';
 import { createRemoteTag } from './remote-manager.js';
+import { openHistoryPreview } from './history-preview.js';
 
 const FORCE_PUSH_HOLD_MS = 700;
 
@@ -372,12 +373,22 @@ export function renderRow(project, parentFolder = null) {
   commitBtn.disabled = !project.branches || !project.uncommitted;
   commitBtn.addEventListener('click', () => doQuickCommit(project));
 
+  const historyBtn = document.createElement('button');
+  historyBtn.className = 'btn btn-history';
+  historyBtn.type = 'button';
+  historyBtn.title = 'Preview Git history';
+  historyBtn.setAttribute('aria-label', `Preview Git history for ${basename(project.path)}`);
+  historyBtn.innerHTML = iconHtml('history', { size: 11, strokeWidth: 1.8 });
+  historyBtn.disabled = !!project.missing;
+  historyBtn.addEventListener('click', () => openHistoryPreview(project, historyBtn));
+
   const permissionsBtn = document.createElement('button');
   permissionsBtn.className = 'btn btn-permissions';
   permissionsBtn.type = 'button';
   permissionsBtn.title = 'Fix shared permissions';
   permissionsBtn.setAttribute('aria-label', `Fix shared permissions for ${basename(project.path)}`);
   permissionsBtn.innerHTML = iconHtml('wrench', { size: 11, strokeWidth: 1.8 });
+  permissionsBtn.hidden = true;
   permissionsBtn.disabled = !!project.missing;
   permissionsBtn.addEventListener('click', () => (
     withButtonLoading(permissionsBtn, () => doFixPermissions(project))
@@ -407,6 +418,7 @@ export function renderRow(project, parentFolder = null) {
   btnRow.appendChild(pullBtn);
   btnRow.appendChild(pushBtn);
   btnRow.appendChild(commitBtn);
+  btnRow.appendChild(historyBtn);
   btnRow.appendChild(permissionsBtn);
 
 const moveBtn = document.createElement('button');
@@ -542,6 +554,18 @@ const moveBtn = document.createElement('button');
   }
 
   return row;
+}
+
+export function refreshProjectRow(project) {
+  const row = projectsEl.querySelector(`.project-row[data-path="${CSS.escape(project.path)}"]`);
+  if (!row) return;
+  const folder = state.items.find((item) => item.type === 'folder' && item.items.includes(project)) || null;
+  const replacement = renderRow(project, folder);
+  replacement.classList.toggle('group-member', row.classList.contains('group-member'));
+  replacement.style.cssText = row.style.cssText;
+  replacement.hidden = row.hidden;
+  row.replaceWith(replacement);
+  updateBatchButtons();
 }
 
 // Always look up the current row by project path so we operate on whatever

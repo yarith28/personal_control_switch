@@ -1,11 +1,12 @@
 import { log, logDetails } from './js/log.js'; // registers error/unhandledrejection handlers
 import {
-  addBtn, fetchAllBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
+  addBtn, fetchAllBtn, gitManagerBtn, selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn,
   multiSelectBtn, organizeBtn, addFolderBtn, collapseBtn, helpToggleBtn,
   projectSearchToggle, projectFilters, projectSearchInput,
 } from './js/dom.js';
 import { state, getProjects } from './js/state.js';
 import { THEMES, applyTheme, buildSwatches } from './js/themes.js';
+import { savedDarkMode } from './js/theme-palettes.mjs';
 import { FONTS, applyFont, buildFontPicker } from './js/fonts.js';
 import { persist } from './js/persist.js';
 import { refreshAll } from './js/branches.js';
@@ -25,6 +26,7 @@ import { showToast } from './js/notify.js';
 import { normalizeAppRemotes } from './js/app-remotes.mjs';
 import { normalizeRemoteUrlOptions } from './js/remote-url-options.mjs';
 import { confirmDialog } from './js/modal.js';
+import { openHistoryManager } from './js/history-manager.js';
 
 let autoRefreshInitialized = false;
 let startupRefreshTriggered = false;
@@ -49,6 +51,11 @@ document.addEventListener('keydown', (event) => {
   if (!refreshShortcut) return;
   event.preventDefault();
   if (event.repeat) return;
+  const historyRefresh = document.querySelector('.history-preview-card:not([hidden]) .history-preview-header button[aria-label="Refresh history"]');
+  if (historyRefresh) {
+    historyRefresh.click();
+    return;
+  }
   void refreshAll({ force: true, source: 'shortcut' });
 });
 
@@ -56,9 +63,12 @@ function setupAutoRefresh() {
   if (autoRefreshInitialized) return;
   autoRefreshInitialized = true;
 
-  window.addEventListener('focus', () => refreshAll({ force: true, source: 'focus' }));
+  const refreshDashboard = (source) => {
+    if (!document.querySelector('.history-preview-overlay')) void refreshAll({ force: true, source });
+  };
+  window.addEventListener('focus', () => refreshDashboard('focus'));
   setInterval(() => {
-    if (document.hasFocus()) refreshAll({ force: true, source: 'interval' });
+    if (document.hasFocus()) refreshDashboard('interval');
   }, 60 * 1000);
 }
 
@@ -87,10 +97,11 @@ function subscribeGitProgress() {
 }
 
 // ── Top-level event listeners ───────────────────────────────────────────────
-addBtn.addEventListener('click', addProject);
+addBtn.addEventListener('click', () => withButtonLoading(addBtn, addProject));
 fetchAllBtn.addEventListener('click', () =>
   withButtonLoading(fetchAllBtn, fetchAllProjects)
 );
+gitManagerBtn.addEventListener('click', () => openHistoryManager(gitManagerBtn));
 pullSelectedBtn.addEventListener('click', () =>
   withButtonLoading(pullSelectedBtn, () => batchOp('Pulling', (path) => window.api.pull(path)))
 );
@@ -333,8 +344,15 @@ projectSearchInput?.addEventListener('keydown', (event) => {
   });
 
   state.currentTheme = THEMES.find((t) => t.id === config.theme) || THEMES[0];
+  state.darkMode = savedDarkMode(state.currentTheme, config.darkMode);
   applyTheme(state.currentTheme);
   buildSwatches();
+  document.getElementById('dark-mode-toggle')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    state.darkMode = !state.darkMode;
+    applyTheme(state.currentTheme);
+    await persist();
+  });
 
   state.currentFont = FONTS.find((f) => f.id === config.font) || FONTS[0];
   applyFont(state.currentFont);

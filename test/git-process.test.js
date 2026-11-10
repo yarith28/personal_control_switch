@@ -93,6 +93,38 @@ test('the Git runner commits input and reports repository state', async (t) => {
   assert.equal(noChanges.errorSummary, 'Nothing to commit.');
 });
 
+test('limited Git output stops at its byte budget without splitting UTF-8 characters', async (t) => {
+  const { dir, service } = await withRepo(t);
+  const text = '💚'.repeat(20000);
+  await fs.writeFile(path.join(dir, 'large.txt'), text);
+  const hash = await service.runGit(['hash-object', '-w', 'large.txt'], dir);
+  assert.equal(hash.ok, true);
+  const args = ['cat-file', 'blob', hash.stdout.trim()];
+  const limited = await service.runGitLimited(args, dir, { maxStdoutBytes: 16383 });
+  assert.equal(limited.ok, true, limited.errorRaw);
+  assert.equal(limited.stdoutTruncated, true);
+  assert.equal(Buffer.byteLength(limited.stdout), 16380);
+  assert.equal(limited.stdout.includes('\ufffd'), false);
+  assert.equal(limited.stdout, '💚'.repeat(4095));
+  const complete = await service.runGit(args, dir);
+  assert.equal(complete.ok, true);
+  assert.equal(complete.stdoutTruncated, false);
+  assert.equal(complete.stdout, text);
+});
+
+test('limited Git reads preserve exact-budget output and report real errors', async (t) => {
+  const { dir, service } = await withRepo(t);
+  await fs.writeFile(path.join(dir, 'exact.txt'), 'a'.repeat(160000));
+  const hash = await service.runGit(['hash-object', '-w', 'exact.txt'], dir);
+  const exact = await service.runGitLimited(['cat-file', 'blob', hash.stdout.trim()], dir);
+  assert.equal(exact.ok, true);
+  assert.equal(exact.stdoutTruncated, false);
+  assert.equal(exact.stdout.length, 160000);
+  const error = await service.runGitLimited(['cat-file', 'blob', 'does-not-exist'], dir);
+  assert.equal(error.ok, false);
+  assert.match(error.errorRaw, /fatal|invalid/i);
+});
+
 test('streaming Git operations can be cancelled', { skip: process.platform === 'win32' }, async (t) => {
   const { dir } = await withRepo(t);
   const service = createGitService({ streamingTimeoutMs: 5000 });

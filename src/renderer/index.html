@@ -50,6 +50,9 @@
           <button id="fetch-all" class="btn-select-toggle icon-only" type="button" title="Fetch all projects" aria-label="Fetch all projects" disabled>
             <span data-icon="arrowDownUp" data-icon-size="12" data-icon-stroke="1.8"></span>
           </button>
+          <button id="git-manager" class="btn-select-toggle icon-only" type="button" title="Git Manager" aria-label="Open Git manager" disabled>
+            <span data-icon="history" data-icon-size="12" data-icon-stroke="1.8"></span>
+          </button>
           <button id="multi-select-btn" class="btn-select-toggle icon-only" type="button" title="Batch select" aria-label="Toggle batch selection" aria-pressed="false">
             <span data-icon="listChecks" data-icon-size="12" data-icon-stroke="1.8"></span>
           </button>
@@ -72,6 +75,10 @@
                 <div class="settings-row">
                   <div class="settings-label">Theme</div>
                   <div class="theme-swatches" id="theme-swatches"></div>
+                </div>
+                <div class="settings-row">
+                  <div class="settings-label">Dark mode</div>
+                  <button class="toggle-switch" id="dark-mode-toggle" type="button" aria-label="Toggle dark mode" aria-pressed="false"></button>
                 </div>
                 <div class="settings-row">
                   <div class="settings-label">Font</div>
@@ -167,6 +174,7 @@
           </span>
           <span id="modal-option-label"></span>
         </label>
+        <div class="modal-selection" id="modal-selection" hidden></div>
         <div class="modal-actions">
           <button class="btn modal-cancel" id="modal-cancel" type="button">Cancel</button>
           <button class="btn modal-confirm" id="modal-confirm" type="button">Remove</button>
@@ -191,7 +199,7 @@
           <div class="helper-grid">
             <div class="helper-row">
               <span class="helper-pill helper-pill-text">+ Add project</span>
-              <div class="helper-copy">Add one or more Git repo folders to the list.</div>
+              <div class="helper-copy">Choose Git repos or a parent folder, scan it, and select which discovered repos to import.</div>
             </div>
             <div class="helper-row">
               <span class="helper-pill helper-pill-icon"><span data-icon="circleHelp" data-icon-size="12" data-icon-stroke="1.8"></span></span>

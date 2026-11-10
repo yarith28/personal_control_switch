@@ -26,6 +26,7 @@ export async function persist() {
   const outputWrap = document.getElementById('output-wrap');
   await window.api.saveConfig({
     theme: state.currentTheme.id,
+    darkMode: state.darkMode,
     font: state.currentFont?.id || 'system',
     compact: !!state.compactMode,
     burst: !!state.burstMode,

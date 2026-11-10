@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   setConfigLocation: (configPath) => ipcRenderer.invoke('set-config-location', configPath),
   resetConfigLocation: () => ipcRenderer.invoke('reset-config-location'),
   pickFolders: () => ipcRenderer.invoke('pick-folder'),
+  scanGitRepositories: (rootPaths) => ipcRenderer.invoke('scan-git-repositories', rootPaths),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getBranches: (repoPath) => ipcRenderer.invoke('get-branches', repoPath),
   checkout: (repoPath, branch) => ipcRenderer.invoke('checkout', repoPath, branch),
@@ -38,6 +39,13 @@ contextBridge.exposeInMainWorld('api', {
   testAppRemote: (repoPath, appRemote) => ipcRenderer.invoke('test-app-remote', repoPath, appRemote),
   clearAppRemote: (repoPath, remoteId) => ipcRenderer.invoke('clear-app-remote', repoPath, remoteId),
   gitStatus: (repoPath) => ipcRenderer.invoke('git-status', repoPath),
+  gitHistoryPreview: (repoPath, previousSnapshot) => ipcRenderer.invoke('git-history-preview', repoPath, previousSnapshot),
+  gitHistoryCommit: (repoPath, sha) => ipcRenderer.invoke('git-history-commit', repoPath, sha),
+  gitHistoryPatch: (payload) => ipcRenderer.invoke('git-history-patch', payload),
+  gitHistorySetStaging: (payload) => ipcRenderer.invoke('git-history-set-staging', payload),
+  gitHistoryCommitStaged: (repoPath, message, expectedSnapshot) => (
+    ipcRenderer.invoke('git-history-commit-staged', repoPath, message, expectedSnapshot)
+  ),
   commitAll: (repoPath, message, amend = false) => ipcRenderer.invoke('git-commit-all', repoPath, message, amend),
   identityGet: (scope, repoPath = '') => ipcRenderer.invoke('identity-get', { scope, repoPath }),
   identitySave: (payload) => ipcRenderer.invoke('identity-save', payload),

@@ -1,4 +1,5 @@
 const { spawn, execFile } = require('node:child_process');
+const { StringDecoder } = require('node:string_decoder');
 
 const DEFAULT_GIT_TIMEOUT_MS = 2 * 60 * 1000;
 const STREAMING_GIT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -315,10 +316,19 @@ function createGitService({
     timeoutMs = defaultTimeoutMs,
     cancellable = false,
     liveOutput = false,
+    maxStdoutBytes = Infinity,
+    maxStderrBytes = Infinity,
+    stopOnStdoutLimit = false,
   } = {}) {
     return new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
       let settled = false;
       let terminationReason = '';
       let forceKillTimer = null;
@@ -351,27 +361,49 @@ function createGitService({
         clearTimeout(timeoutTimer);
         clearTimeout(forceKillTimer);
         untrack(cwd, operation);
+        if (!stdoutTruncated) stdout += stdoutDecoder.end();
+        if (!stderrTruncated) stderr += stderrDecoder.end();
         if (spawnError && !stderr) stderr = spawnError.message;
         resolve(finalizeGitResult(args, {
-          ok: code === 0 && !terminationReason && !spawnError,
+          ok: !spawnError && ((code === 0 && !terminationReason) || terminationReason === 'output-limit'),
           exitCode: Number.isInteger(code) ? code : null,
           stdout,
           stderr,
           liveOutput,
           cancelled: terminationReason === 'cancelled',
           timedOut: terminationReason === 'timeout',
+          stdoutTruncated,
+          stderrTruncated,
         }));
       };
 
       child.stdout?.on('data', (chunk) => {
-        const text = chunk.toString();
+        if (settled) return;
+        const remaining = Math.max(0, maxStdoutBytes - stdoutBytes);
+        const kept = chunk.subarray(0, Math.min(chunk.length, remaining));
+        stdoutBytes += kept.length;
+        const text = stdoutDecoder.write(kept);
         stdout += text;
-        onProgress?.({ stream: 'stdout', text });
+        if (text) onProgress?.({ stream: 'stdout', text });
+        if (chunk.length > remaining) {
+          stdoutTruncated = true;
+          if (stopOnStdoutLimit && !terminationReason) {
+            terminationReason = 'output-limit';
+            terminateProcessTree(child, false);
+            forceKillTimer = setTimeout(() => terminateProcessTree(child, true), FORCE_KILL_DELAY_MS);
+            forceKillTimer.unref?.();
+          }
+        }
       });
       child.stderr?.on('data', (chunk) => {
-        const text = chunk.toString();
+        if (settled) return;
+        const remaining = Math.max(0, maxStderrBytes - stderrBytes);
+        const kept = chunk.subarray(0, Math.min(chunk.length, remaining));
+        stderrBytes += kept.length;
+        const text = stderrDecoder.write(kept);
         stderr += text;
-        onProgress?.({ stream: 'stderr', text });
+        if (text) onProgress?.({ stream: 'stderr', text });
+        if (chunk.length > remaining) stderrTruncated = true;
       });
       child.once('error', (error) => finish(null, error));
       child.once('close', (code) => finish(code));
@@ -396,6 +428,10 @@ function createGitService({
 
   function runGit(args, cwd) {
     return runGitProcess(args, cwd);
+  }
+
+  function runGitLimited(args, cwd, { maxStdoutBytes = 160000, maxStderrBytes = 16384 } = {}) {
+    return runGitProcess(args, cwd, { maxStdoutBytes, maxStderrBytes, stopOnStdoutLimit: true });
   }
 
   function runGitWithInput(args, cwd, input, envOverrides = {}) {
@@ -425,6 +461,7 @@ function createGitService({
 
   return {
     runGit,
+    runGitLimited,
     runGitWithInput,
     runGitStreaming,
     cancelRepoOperations,

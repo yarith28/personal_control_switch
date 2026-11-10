@@ -1,4 +1,4 @@
-import { selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn, fetchAllBtn, projectsEl } from './dom.js';
+import { selectAll, pullSelectedBtn, pushSelectedBtn, fetchSelectedBtn, fetchAllBtn, gitManagerBtn, projectsEl } from './dom.js';
 import { state, getProjects, removeItem } from './state.js';
 import { basename } from './util.js';
 import { log, logDetails } from './log.js';
@@ -7,7 +7,7 @@ import { persist } from './persist.js';
 import { refreshAll, refreshBranches } from './branches.js';
 import { renderProjects } from './render-list.js';
 import { setRowBusy, setRowCancellable, setRowStatus } from './render-row.js';
-import { confirmDialog, promptDialog } from './modal.js';
+import { confirmDialog, promptDialog, selectionDialog } from './modal.js';
 
 const LONG_RUNNING_WARNING_MS = 8000;
 let pushSetupPromptQueue = Promise.resolve();
@@ -174,6 +174,7 @@ export function updateBatchButtons() {
   pushSelectedBtn.disabled = !anySelected;
   fetchSelectedBtn.disabled = !anySelected;
   fetchAllBtn.disabled = !anyFetchable;
+  gitManagerBtn.disabled = projects.length === 0;
 
   const selectable = projects.filter((p) => p.branches);
   selectAll.checked =
@@ -380,32 +381,57 @@ export async function addProjectPaths(dirs, { notify = false } = {}) {
   let duplicateCount = 0;
   let invalidCount = 0;
   let firstInvalidReason = '';
+  const progress = showToast('Importing repositories…', 'Checking Git status and adding projects as they are ready.', {
+    duration: 0,
+  });
 
-  for (const dir of dirs) {
-    if (typeof dir !== 'string' || !dir.trim()) continue;
-    if (existing.has(dir)) {
-      log(`Already in list: ${dir}`);
-      duplicateCount += 1;
-      continue;
-    }
+  try {
+    for (const [index, dir] of dirs.entries()) {
+      progress?.updateTitle(`Importing ${index + 1} of ${dirs.length} repositories…`);
+      if (typeof dir !== 'string' || !dir.trim()) continue;
+      if (existing.has(dir)) {
+        log(`Already in list: ${dir}`);
+        duplicateCount += 1;
+        continue;
+      }
 
-    const project = { type: 'project', path: dir, pinned: false, selected: false };
-    try {
-      await refreshBranches(project);
-    } catch (error) {
-      project.branches = null;
-      project.error = error?.message || String(error);
-    }
-    if (!project.branches) {
-      log(`Cannot add ${dir}: ${project.error}`);
-      invalidCount += 1;
-      if (!firstInvalidReason) firstInvalidReason = project.error || 'Not a Git repository.';
-      continue;
-    }
+      const project = { type: 'project', path: dir, pinned: false, selected: false };
+      try {
+        await refreshBranches(project);
+      } catch (error) {
+        project.branches = null;
+        project.error = error?.message || String(error);
+      }
+      if (!project.branches) {
+        log(`Cannot add ${dir}: ${project.error}`);
+        invalidCount += 1;
+        if (!firstInvalidReason) firstInvalidReason = project.error || 'Not a Git repository.';
+        continue;
+      }
+      if (getProjects().some((item) => item.path === dir)) {
+        duplicateCount += 1;
+        existing.add(dir);
+        continue;
+      }
 
-    state.items.push(project);
-    existing.add(dir);
-    added.push(dir);
+      state.items.push(project);
+      try {
+        await persist();
+      } catch (error) {
+        removeItem(project);
+        throw error;
+      }
+      existing.add(dir);
+      added.push(dir);
+      renderProjects();
+    }
+  } catch (error) {
+    const message = error?.message || String(error);
+    log(`[import] ${message}`);
+    showToast('Project import stopped', `${added.length} projects added. ${message}`, { tone: 'error' });
+    return;
+  } finally {
+    progress?.dismiss();
   }
 
   if (added.length === 0) {
@@ -419,8 +445,6 @@ export async function addProjectPaths(dirs, { notify = false } = {}) {
     return;
   }
 
-  await persist();
-  renderProjects();
   log(
     added.length === 1
       ? `Added ${added[0]}`
@@ -431,14 +455,67 @@ export async function addProjectPaths(dirs, { notify = false } = {}) {
     const skipped = duplicateCount + invalidCount;
     showToast(
       added.length === 1 ? `Added ${basename(added[0])}` : `Added ${added.length} projects`,
-      skipped > 0 ? `${skipped} dropped item${skipped === 1 ? ' was' : 's were'} skipped.` : ''
+      skipped > 0 ? `${skipped} item${skipped === 1 ? ' was' : 's were'} skipped.` : ''
     );
   }
 }
 
 export async function addProject() {
-  const dirs = await window.api.pickFolders();
-  await addProjectPaths(dirs);
+  const roots = await window.api.pickFolders();
+  if (!roots.length) return;
+
+  showToast(
+    roots.length === 1 ? `Scanning ${basename(roots[0])}…` : `Scanning ${roots.length} folders…`,
+    'Looking for Git repositories.'
+  );
+  let result;
+  try {
+    if (typeof window.api.scanGitRepositories !== 'function') {
+      throw new Error('Restart Git Sync to load the repository scanner.');
+    }
+    result = await window.api.scanGitRepositories(roots);
+  } catch (error) {
+    result = { ok: false, error: error?.message || String(error) };
+  }
+  if (!result?.ok) {
+    const message = result?.error || 'The selected folders could not be scanned.';
+    log(`[scan] ${message}`);
+    showToast('Repository scan failed', message, { tone: 'error' });
+    return;
+  }
+
+  if (result.repositories.length === 0) {
+    const detail = result.skippedDirectories > 0
+      ? `${result.skippedDirectories} folder${result.skippedDirectories === 1 ? ' was' : 's were'} unreadable.`
+      : 'Choose a Git repository or a parent folder that contains repositories.';
+    showToast('No Git repositories found', detail, { tone: 'warning' });
+    return;
+  }
+
+  const existing = new Set(getProjects().map((project) => project.path));
+  const scanNotes = [
+    `${result.repositories.length} Git repositor${result.repositories.length === 1 ? 'y' : 'ies'} found in ${result.scannedDirectories} scanned folder${result.scannedDirectories === 1 ? '' : 's'}.`,
+  ];
+  if (result.skippedDirectories > 0) {
+    scanNotes.push(`${result.skippedDirectories} unreadable folder${result.skippedDirectories === 1 ? ' was' : 's were'} skipped.`);
+  }
+  if (result.truncated) scanNotes.push('The scan limit was reached; narrow the selected folder to find more.');
+
+  const selected = await selectionDialog({
+    message: 'Import discovered repositories',
+    detail: scanNotes.join(' '),
+    items: result.repositories.map((repoPath) => ({
+      value: repoPath,
+      label: basename(repoPath),
+      description: repoPath,
+      disabled: existing.has(repoPath),
+      checked: !existing.has(repoPath),
+      disabledLabel: 'Already added',
+    })),
+    confirmText: 'Import',
+  });
+  if (!selected) return;
+  await addProjectPaths(selected, { notify: true });
 }
 
 export async function removeProject(project) {

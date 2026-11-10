@@ -1,5 +1,6 @@
 export const addBtn = document.getElementById('add-project');
 export const fetchAllBtn = document.getElementById('fetch-all');
+export const gitManagerBtn = document.getElementById('git-manager');
 export const helpToggleBtn = document.getElementById('help-toggle');
 export const selectAll = document.getElementById('select-all');
 export const pullSelectedBtn = document.getElementById('pull-selected');

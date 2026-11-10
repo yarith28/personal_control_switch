@@ -50,7 +50,14 @@ export function showToast(title, body = '', { tone = 'default', duration = TOAST
     toast.classList.add('open');
   });
 
-  window.setTimeout(() => {
-    dismissToast(toast);
-  }, duration);
+  if (duration > 0) {
+    window.setTimeout(() => {
+      dismissToast(toast);
+    }, duration);
+  }
+
+  return {
+    updateTitle: (nextTitle) => { titleEl.textContent = nextTitle; },
+    dismiss: () => dismissToast(toast),
+  };
 }

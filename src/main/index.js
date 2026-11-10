@@ -4,6 +4,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
+const { createHash } = require('node:crypto');
 const { createGitService, combinedGitOutput } = require('./git-process');
 const { createConfigStore } = require('./config-store');
 const { createConfigLocationStore } = require('./config-location');
@@ -53,6 +54,7 @@ function spawnDetachedCommand(command, args, options) {
 }
 const {
   runGit,
+  runGitLimited,
   runGitWithInput,
   runGitStreaming,
   cancelRepoOperations,
@@ -776,11 +778,141 @@ ipcMain.handle('reset-config-location', async () => {
 
 ipcMain.handle('pick-folder', async () => {
   const result = await dialog.showOpenDialog({
+    title: 'Choose Git repositories or a parent folder',
     properties: ['openDirectory', 'multiSelections'],
   });
   if (result.canceled) return [];
   return result.filePaths;
 });
+
+const REPOSITORY_SCAN_MAX_DIRECTORIES = 20000;
+const REPOSITORY_SCAN_MAX_REPOSITORIES = 1000;
+const REPOSITORY_SCAN_MAX_DEPTH = 20;
+const REPOSITORY_SCAN_BATCH_SIZE = 32;
+const REPOSITORY_SCAN_IGNORED_DIRECTORIES = new Set([
+  '.git',
+  '.gradle',
+  '.pnpm',
+  '.pub-cache',
+  '.dart_tool',
+  'node_modules',
+  'Pods',
+]);
+
+async function inspectRepositoryScanDirectory(directory, depth) {
+  try {
+    const stat = await fs.stat(directory);
+    if (!stat.isDirectory()) return { directory, depth, children: [], skipped: true };
+
+    try {
+      const marker = await fs.lstat(path.join(directory, '.git'));
+      if (marker.isDirectory() || marker.isFile()) {
+        return { directory, depth, repository: true, children: [] };
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
+    }
+
+    if (depth >= REPOSITORY_SCAN_MAX_DEPTH) {
+      return { directory, depth, children: [], depthLimited: true };
+    }
+
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    const children = entries
+      .filter((entry) => (
+        entry.isDirectory()
+        && !entry.isSymbolicLink()
+        && !REPOSITORY_SCAN_IGNORED_DIRECTORIES.has(entry.name)
+      ))
+      .map((entry) => path.join(directory, entry.name));
+    return { directory, depth, children };
+  } catch (error) {
+    return {
+      directory,
+      depth,
+      children: [],
+      skipped: true,
+      error: error?.message || String(error),
+    };
+  }
+}
+
+async function scanGitRepositories(rootPaths = []) {
+  if (!Array.isArray(rootPaths)) {
+    return { ok: false, error: 'Choose one or more folders to scan.' };
+  }
+
+  const roots = [...new Set(rootPaths
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => path.resolve(value.trim())))];
+  if (roots.length === 0) {
+    return { ok: false, error: 'Choose one or more folders to scan.' };
+  }
+
+  const queued = new Set(roots);
+  const queue = roots.map((directory) => ({ directory, depth: 0 }));
+  const repositories = [];
+  const errors = [];
+  let scannedDirectories = 0;
+  let skippedDirectories = 0;
+  let depthLimitedDirectories = 0;
+  let truncated = false;
+
+  while (queue.length > 0 && repositories.length < REPOSITORY_SCAN_MAX_REPOSITORIES) {
+    const remaining = REPOSITORY_SCAN_MAX_DIRECTORIES - scannedDirectories;
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+
+    const batch = queue.splice(0, Math.min(REPOSITORY_SCAN_BATCH_SIZE, remaining));
+    const results = await Promise.all(batch.map(({ directory, depth }) => (
+      inspectRepositoryScanDirectory(directory, depth)
+    )));
+    scannedDirectories += results.length;
+
+    for (const result of results) {
+      if (result.repository) {
+        if (repositories.length < REPOSITORY_SCAN_MAX_REPOSITORIES) {
+          repositories.push(result.directory);
+        } else {
+          truncated = true;
+        }
+        continue;
+      }
+      if (result.skipped) {
+        skippedDirectories += 1;
+        if (result.error && errors.length < 5) {
+          errors.push({ path: result.directory, error: result.error });
+        }
+        continue;
+      }
+      if (result.depthLimited) depthLimitedDirectories += 1;
+      for (const child of result.children) {
+        if (queued.has(child)) continue;
+        queued.add(child);
+        queue.push({ directory: child, depth: result.depth + 1 });
+      }
+    }
+  }
+
+  if (queue.length > 0 || repositories.length >= REPOSITORY_SCAN_MAX_REPOSITORIES) {
+    truncated = true;
+  }
+
+  return {
+    ok: true,
+    roots,
+    repositories: repositories.sort((left, right) => left.localeCompare(right)),
+    scannedDirectories,
+    skippedDirectories,
+    depthLimitedDirectories,
+    truncated,
+    errors,
+  };
+}
+
+ipcMain.handle('scan-git-repositories', (_, rootPaths) => scanGitRepositories(rootPaths));
 
 ipcMain.handle('get-branches', async (_, repoPath, appRemoteValue = null) => {
   // Distinguish a deleted/missing folder from a folder that simply isn't a repo,
@@ -1660,7 +1792,7 @@ function parseCommitHistory(stdout) {
 }
 
 async function commitToolHistory(repoPath, requestedLimit = 100) {
-  const limit = Math.min(1000, Math.max(100, Math.trunc(Number(requestedLimit)) || 100));
+  const limit = Math.min(1000, Math.max(1, Math.trunc(Number(requestedLimit)) || 100));
   const check = await runGit(['rev-parse', '--is-inside-work-tree'], repoPath);
   if (!check.ok) {
     return {
@@ -1674,7 +1806,7 @@ async function commitToolHistory(repoPath, requestedLimit = 100) {
     runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoPath),
     runGit(['status', '--porcelain=v1', '--untracked-files=all'], repoPath),
     runGit([
-      'log', '-n', String(limit),
+      'log', '--topo-order', '-n', String(limit),
       `--pretty=format:%H${COMMIT_FIELD_SEP}%P${COMMIT_FIELD_SEP}%an${COMMIT_FIELD_SEP}%ae${COMMIT_FIELD_SEP}%aI${COMMIT_FIELD_SEP}%D${COMMIT_FIELD_SEP}%G?${COMMIT_FIELD_SEP}%s${COMMIT_RECORD_SEP}`,
       'HEAD',
     ], repoPath),
@@ -1750,7 +1882,7 @@ async function commitToolDetail(repoPath, commit) {
   if (!detail.ok) return detail;
   const ancestor = await runGit(['merge-base', '--is-ancestor', detail.commit.sha, 'HEAD'], repoPath);
   const descendants = ancestor.ok
-    ? await runGit(['rev-list', '--count', `${detail.commit.sha}..HEAD`], repoPath)
+    ? await runGit(['rev-list', '--count', '--ancestry-path', `${detail.commit.sha}..HEAD`], repoPath)
     : null;
   return {
     ...detail,
@@ -1762,6 +1894,264 @@ async function commitToolDetail(repoPath, commit) {
     },
   };
 }
+
+async function resolveHistoryRoot(repoPath) {
+  const result = await runGit(['rev-parse', '--show-toplevel'], repoPath);
+  if (!result.ok) return { ok: false, error: result.errorSummary, raw: result.errorRaw };
+  try {
+    return { ok: true, root: await fs.realpath(result.stdout.replace(/\r?\n$/, '')) };
+  } catch (error) {
+    return { ok: false, error: error.message || 'Could not resolve the repository root.' };
+  }
+}
+
+async function readHistorySnapshot(repoPath) {
+  const [ref, head, index] = await Promise.all([
+    runGit(['symbolic-ref', '--quiet', 'HEAD'], repoPath),
+    runGit(['rev-parse', '--verify', '--quiet', 'HEAD'], repoPath),
+    runGit(['ls-files', '--stage', '-z'], repoPath),
+  ]);
+  if (!index.ok) return { ok: false, error: index.errorSummary, raw: index.errorRaw };
+  if (!head.ok && !ref.ok) return { ok: false, error: 'Could not read the current branch or HEAD.' };
+  return {
+    ok: true,
+    snapshot: {
+      repoPath,
+      ref: ref.ok ? ref.stdout.trim() : '',
+      head: head.ok ? head.stdout.trim() : '',
+      index: createHash('sha256').update(index.stdout).digest('hex'),
+    },
+  };
+}
+
+function sameHistorySnapshot(expected, actual) {
+  return ['repoPath', 'ref', 'head', 'index'].every((key) => (
+    typeof expected?.[key] === 'string' && expected[key] === actual[key]
+  ));
+}
+
+function historySnapshotChanged() {
+  return {
+    ok: false,
+    code: 'HISTORY_STATE_CHANGED',
+    error: 'The repository branch, HEAD, or staged files changed. Review the refreshed file status before committing.',
+  };
+}
+
+async function gitHistoryPreview(repoPath, previousSnapshot = null) {
+  const resolved = await resolveHistoryRoot(repoPath);
+  if (!resolved.ok) return resolved;
+  repoPath = resolved.root;
+  const before = await readHistorySnapshot(repoPath);
+  if (!before.ok) return before;
+  const needsHistory = !['repoPath', 'ref', 'head'].every((key) => (
+    typeof previousSnapshot?.[key] === 'string' && previousSnapshot[key] === before.snapshot[key]
+  ));
+  const [history, status] = await Promise.all([
+    needsHistory ? commitToolHistory(repoPath, 30) : null,
+    runGit(['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], repoPath),
+  ]);
+  if (history && !history.ok) return history;
+  if (!status.ok) return { ok: false, error: status.errorSummary || 'Could not read working-tree changes.' };
+  const after = await readHistorySnapshot(repoPath);
+  if (!after.ok) return after;
+  if (!sameHistorySnapshot(before.snapshot, after.snapshot)) return historySnapshotChanged();
+
+  const records = status.stdout.split('\0');
+  const changes = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const code = record.slice(0, 2);
+    const renamed = /[RC]/.test(code);
+    changes.push({
+      path: record.slice(3),
+      originalPath: renamed ? records[++index] : null,
+      status: code,
+      staged: code[0] !== ' ' && code[0] !== '?',
+      unstaged: code[1] !== ' ' && code[1] !== '?',
+      untracked: code === '??',
+    });
+  }
+  return {
+    ok: true,
+    branch: after.snapshot.ref.replace(/^refs\/heads\//, ''),
+    detached: !after.snapshot.ref,
+    ...(history ? { commits: history.commits, totalCount: history.totalCount } : {}),
+    changes,
+    commitSnapshot: after.snapshot,
+  };
+}
+
+async function gitHistoryCommit(repoPath, sha) {
+  const resolved = await resolveHistoryRoot(repoPath);
+  if (!resolved.ok) return resolved;
+  repoPath = resolved.root;
+  const detail = await readCommitObject(repoPath, sha);
+  if (!detail.ok) return detail;
+  const commit = detail.commit;
+  const args = commit.parents.length
+    ? ['diff', '--name-status', '-z', '--find-renames', commit.parents[0], commit.sha, '--']
+    : ['diff-tree', '--root', '--no-commit-id', '--name-status', '-z', '--find-renames', '-r', commit.sha, '--'];
+  const result = await runGit(args, repoPath);
+  if (!result.ok) return { ok: false, error: result.errorSummary || 'Could not read the commit files.' };
+  const records = result.stdout.split('\0');
+  const files = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const status = records[index];
+    if (!status) continue;
+    const originalPath = records[++index];
+    const renamed = /^[RC]/.test(status);
+    files.push({
+      status,
+      originalPath: renamed ? originalPath : null,
+      path: renamed ? records[++index] : originalPath,
+    });
+  }
+  return { ok: true, commit, files };
+}
+
+function validHistoryFilePath(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && !value.includes('\0')
+    && !path.isAbsolute(value)
+    && !value.split(/[\\/]/).some((part) => part === '..' || part.toLowerCase() === '.git');
+}
+
+async function gitHistoryPatch({ repoPath, commit = '', filePath, originalPath = null, kind = 'unstaged' } = {}) {
+  if (!validHistoryFilePath(filePath) || (originalPath && !validHistoryFilePath(originalPath))) {
+    return { ok: false, error: 'Choose a file inside the repository.' };
+  }
+  if (!['staged', 'unstaged', 'untracked'].includes(kind)) {
+    return { ok: false, error: 'Invalid change type.' };
+  }
+  const resolved = await resolveHistoryRoot(repoPath);
+  if (!resolved.ok) return resolved;
+  repoPath = resolved.root;
+
+  const previewLimit = 160000;
+  if (!commit && kind === 'untracked') {
+    let handle;
+    try {
+      const root = await fs.realpath(repoPath);
+      const resolvedFile = await fs.realpath(path.join(root, filePath));
+      const relative = path.relative(root, resolvedFile);
+      if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+        return { ok: false, error: 'This file points outside the repository.' };
+      }
+      const fileStat = await fs.stat(resolvedFile);
+      if (!fileStat.isFile()) return { ok: false, error: 'This entry is not a regular file.' };
+      handle = await fs.open(resolvedFile, 'r');
+      const stat = await handle.stat();
+      if (!stat.isFile()) return { ok: false, error: 'This entry is not a regular file.' };
+      const buffer = Buffer.alloc(previewLimit + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (buffer.subarray(0, bytesRead).includes(0)) {
+        return { ok: true, patch: 'Binary file — content preview unavailable.', binary: true };
+      }
+      return {
+        ok: true,
+        patch: buffer.subarray(0, Math.min(bytesRead, previewLimit)).toString('utf8'),
+        truncated: bytesRead > previewLimit,
+        plainText: true,
+      };
+    } catch (error) {
+      return { ok: false, error: error.message || 'Could not read this file.' };
+    } finally {
+      await handle?.close();
+    }
+  }
+
+  const options = ['--no-ext-diff', '--no-textconv', '--no-color', '--find-renames'];
+  let args;
+  if (commit) {
+    const detail = await readCommitObject(repoPath, commit);
+    if (!detail.ok) return detail;
+    const item = detail.commit;
+    args = item.parents.length
+      ? ['diff', ...options, item.parents[0], item.sha]
+      : ['show', '--format=', ...options, item.sha];
+  } else {
+    args = ['diff', ...options];
+    if (kind === 'staged') args.push('--cached');
+  }
+  args.push('--', ...[originalPath, filePath].filter(Boolean).map((value) => `:(literal)${value}`));
+  const result = await runGitLimited(args, repoPath, { maxStdoutBytes: previewLimit });
+  if (!result.ok) return { ok: false, error: result.errorSummary || 'Could not read this diff.' };
+  return {
+    ok: true,
+    patch: result.stdout,
+    truncated: result.stdoutTruncated,
+  };
+}
+
+ipcMain.handle('git-history-preview', (_, repoPath, previousSnapshot) => gitHistoryPreview(repoPath, previousSnapshot));
+ipcMain.handle('git-history-commit', (_, repoPath, sha) => gitHistoryCommit(repoPath, sha));
+ipcMain.handle('git-history-patch', (_, payload) => gitHistoryPatch(payload));
+
+const historyMutationLocks = new Set();
+
+async function setHistoryStaging({ repoPath, paths = [], staged } = {}) {
+  if (!Array.isArray(paths) || paths.length === 0 || paths.some((value) => !validHistoryFilePath(value))) {
+    return { ok: false, error: 'Select valid repository files.' };
+  }
+  if (typeof staged !== 'boolean') return { ok: false, error: 'Invalid staging action.' };
+  const resolved = await resolveHistoryRoot(repoPath);
+  if (!resolved.ok) return resolved;
+  repoPath = resolved.root;
+  if (historyMutationLocks.has(repoPath)) return { ok: false, error: 'A file-status action is already running.' };
+  historyMutationLocks.add(repoPath);
+  try {
+    const status = await runGit(['status', '--porcelain=v1', '-z'], repoPath);
+    if (!status.ok) return { ok: false, error: status.errorSummary, raw: status.errorRaw };
+    let args;
+    if (staged) {
+      args = ['--literal-pathspecs', 'add', '--all', '--'];
+    } else {
+      const head = await runGit(['rev-parse', '--verify', 'HEAD'], repoPath);
+      args = head.ok
+        ? ['--literal-pathspecs', 'restore', '--staged', '--']
+        : ['--literal-pathspecs', 'rm', '--cached', '--force', '--'];
+    }
+    const result = await runGit([...args, ...new Set(paths)], repoPath);
+    return result.ok ? { ok: true } : { ok: false, error: result.errorSummary, raw: result.errorRaw };
+  } finally {
+    historyMutationLocks.delete(repoPath);
+  }
+}
+
+async function commitHistoryStaged(repoPath, message, expectedSnapshot) {
+  if (typeof message !== 'string' || !message.trim() || message.includes('\0') || message.length > 65536) {
+    return { ok: false, error: 'Enter a valid commit message.' };
+  }
+  const resolved = await resolveHistoryRoot(repoPath);
+  if (!resolved.ok) return resolved;
+  repoPath = resolved.root;
+  if (historyMutationLocks.has(repoPath)) return { ok: false, error: 'A file-status action is already running.' };
+  historyMutationLocks.add(repoPath);
+  try {
+    const staged = await runGit(['diff', '--cached', '--name-only', '-z'], repoPath);
+    if (!staged.ok) return { ok: false, error: staged.errorSummary, raw: staged.errorRaw };
+    if (!staged.stdout) return { ok: false, error: 'Stage at least one file before committing.' };
+    const current = await readHistorySnapshot(repoPath);
+    if (!current.ok) return current;
+    if (!sameHistorySnapshot(expectedSnapshot, current.snapshot)) return historySnapshotChanged();
+    const result = await runGitWithInput(
+      ['commit', '-F', '-'],
+      repoPath,
+      message.trim()
+    );
+    return result.ok ? { ok: true, stdout: result.stdout } : { ok: false, error: result.errorSummary, raw: result.errorRaw };
+  } finally {
+    historyMutationLocks.delete(repoPath);
+  }
+}
+
+ipcMain.handle('git-history-set-staging', (_, payload) => setHistoryStaging(payload));
+ipcMain.handle('git-history-commit-staged', (_, repoPath, message, expectedSnapshot) => (
+  commitHistoryStaged(repoPath, message, expectedSnapshot)
+));
 
 async function rewriteCommitMetadata({
   repoPath,
@@ -1786,7 +2176,7 @@ async function rewriteCommitMetadata({
       return { ok: false, error: 'Select valid commits first.' };
     }
     if (!requestedCommitIds.has(commit)) {
-      return { ok: false, error: 'The oldest selected commit must anchor the batch rewrite.' };
+      return { ok: false, error: 'The anchor commit must be one of the selected commits.' };
     }
     if (!['preserve', 'global'].includes(authorMode)) return { ok: false, error: 'Invalid author option.' };
     if (!['preserve', 'current', 'custom'].includes(authorDateMode)) return { ok: false, error: 'Invalid author date option.' };
@@ -1817,7 +2207,6 @@ async function rewriteCommitMetadata({
 
     const oldHead = oldHeadResult.stdout.trim();
     const target = targetResult.commit;
-    if (target.parents.length > 1) return { ok: false, error: 'Merge commits are not supported by the Commit Tool.' };
 
     const ancestor = await runGit(['merge-base', '--is-ancestor', target.sha, oldHead], repoPath);
     if (!ancestor.ok) {
@@ -1831,38 +2220,51 @@ async function rewriteCommitMetadata({
       };
     }
 
-    let chainShas;
-    if (target.parents.length === 0) {
-      const descendants = await runGit(['rev-list', '--reverse', '--ancestry-path', `${target.sha}..${oldHead}`], repoPath);
-      if (!descendants.ok) return { ok: false, error: descendants.errorSummary || 'Could not inspect descendant commits.', raw: descendants.errorRaw };
-      chainShas = [target.sha, ...descendants.stdout.split('\n').map((sha) => sha.trim()).filter(Boolean)];
-    } else {
-      const chain = await runGit(['rev-list', '--reverse', '--ancestry-path', `${target.sha}^..${oldHead}`], repoPath);
-      if (!chain.ok) return { ok: false, error: chain.errorSummary || 'Could not inspect descendant commits.', raw: chain.errorRaw };
-      chainShas = chain.stdout.split('\n').map((sha) => sha.trim()).filter(Boolean);
+    // Read the parent graph once. Reverse topological order guarantees that
+    // every parent is considered before its children, including at merges.
+    const graphResult = await runGit(['rev-list', '--reverse', '--topo-order', '--parents', oldHead], repoPath);
+    if (!graphResult.ok) {
+      return {
+        ok: false,
+        error: graphResult.errorSummary || 'Could not inspect the commit graph.',
+        raw: graphResult.errorRaw,
+      };
     }
-    if (chainShas[0] !== target.sha || chainShas.at(-1) !== oldHead) {
-      return { ok: false, error: 'The selected commit does not have a single rewrite path to the current branch.' };
+    const graph = graphResult.stdout.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+      const [sha, ...parents] = line.split(/\s+/);
+      return { sha, parents };
+    });
+    const historyShas = graph.map((item) => item.sha);
+    const selectedCommitIds = new Set();
+    for (const requested of requestedCommitIds) {
+      const matches = historyShas.filter((sha) => sha === requested || sha.startsWith(requested));
+      if (matches.length !== 1) {
+        return { ok: false, error: 'All selected commits must belong to the current branch history.' };
+      }
+      selectedCommitIds.add(matches[0]);
+    }
+    if (!selectedCommitIds.has(target.sha)) {
+      return { ok: false, error: 'The anchor commit must be one of the selected commits.' };
+    }
+
+    // A commit must be rebuilt when it is selected or any parent was rebuilt.
+    // This preserves merge topology while leaving unrelated parents untouched.
+    const rewriteCommitIds = new Set();
+    const chainShas = [];
+    for (const item of graph) {
+      if (selectedCommitIds.has(item.sha) || item.parents.some((parent) => rewriteCommitIds.has(parent))) {
+        rewriteCommitIds.add(item.sha);
+        chainShas.push(item.sha);
+      }
+    }
+    if (!rewriteCommitIds.has(oldHead)) {
+      return { ok: false, error: 'The selected commits do not lead to the current branch tip.' };
     }
 
     const metadataResults = await Promise.all(chainShas.map((sha) => readCommitObject(repoPath, sha)));
     const failedRead = metadataResults.find((result) => !result.ok);
     if (failedRead) return failedRead;
-    const selectedCommitIds = new Set();
-    for (const requested of requestedCommitIds) {
-      const matches = chainShas.filter((sha) => sha === requested || sha.startsWith(requested));
-      if (matches.length !== 1) {
-        return { ok: false, error: 'All selected commits must share one linear path to the current branch.' };
-      }
-      selectedCommitIds.add(matches[0]);
-    }
     const chain = metadataResults.map((result) => result.commit);
-    for (let index = 0; index < chain.length; index += 1) {
-      const item = chain[index];
-      if (item.parents.length > 1 || (index > 0 && (item.parents.length !== 1 || item.parents[0] !== chain[index - 1].sha))) {
-        return { ok: false, error: 'This rewrite crosses a branch or merge. Only linear commit history is supported.' };
-      }
-    }
 
     const now = new Date().toISOString();
     let nextAuthorDate = target.authorDate;
@@ -1893,12 +2295,11 @@ async function rewriteCommitMetadata({
     let branchMoved = false;
     let newHead = null;
     const operationResult = await (async () => {
-      let newParent = target.parents[0] || null;
       const rewritten = [];
-      for (let index = 0; index < chain.length; index += 1) {
-        const original = chain[index];
+      const rewrittenByOldSha = new Map();
+      for (const original of chain) {
         const selected = selectedCommitIds.has(original.sha);
-        const selectedSingleCommit = !batchRewrite && index === 0;
+        const selectedSingleCommit = !batchRewrite && original.sha === target.sha;
         const useGlobalAuthor = selected && authorMode === 'global';
         const useGlobalCommitter = selected && committerMode === 'global';
         const env = {
@@ -1912,7 +2313,9 @@ async function rewriteCommitMetadata({
         const args = ['commit-tree'];
         if (reSign) args.push('-S');
         args.push(original.tree);
-        if (newParent) args.push('-p', newParent);
+        for (const parent of original.parents) {
+          args.push('-p', rewrittenByOldSha.get(parent) || parent);
+        }
         const created = await runGitWithInput(args, repoPath, selectedSingleCommit ? message : original.message, env);
         if (!created.ok) {
           const signingHint = reSign ? ' Git could not sign the rewritten commit; check your signing key and agent.' : '';
@@ -1920,10 +2323,10 @@ async function rewriteCommitMetadata({
         }
         const newSha = created.stdout.trim();
         rewritten.push({ oldSha: original.sha, newSha });
-        newParent = newSha;
+        rewrittenByOldSha.set(original.sha, newSha);
       }
 
-      newHead = rewritten.at(-1).newSha;
+      newHead = rewrittenByOldSha.get(oldHead);
       const moved = await runGit(['update-ref', '-m', `commit-tool: rewrite ${target.shortSha}`, currentBranchRef, newHead, oldHead], repoPath);
       if (!moved.ok) return { ok: false, error: moved.errorSummary || 'The branch changed before the rewrite could be applied.', raw: moved.errorRaw };
       branchMoved = true;
@@ -1953,7 +2356,7 @@ async function rewriteCommitMetadata({
         oldHead,
         newHead,
         oldCommit: target.sha,
-        newCommit: rewritten[0].newSha,
+        newCommit: rewrittenByOldSha.get(target.sha),
         selectedCount: selectedCommitIds.size,
         rewrittenCount: rewritten.length,
       };

@@ -208,8 +208,8 @@ function moveBatchFocus(row, direction) {
 
 function renderHistory() {
   const commits = historyState?.commits || [];
-  if (batchMode && !commits.some((commit) => commit.sha === batchFocusSha && !commit.isMerge)) {
-    batchFocusSha = commits.find((commit) => !commit.isMerge)?.sha || null;
+  if (batchMode && !commits.some((commit) => commit.sha === batchFocusSha)) {
+    batchFocusSha = commits[0]?.sha || null;
   }
   historyCount.replaceChildren();
   if ((historyState?.totalCount || 0) > 100) {
@@ -246,19 +246,17 @@ function renderHistory() {
       const checkbox = el('input', {
         type: 'checkbox',
         checked,
-        disabled: commit.isMerge,
         tabindex: '-1',
         'aria-hidden': 'true',
         'aria-label': `Select ${commit.shortSha} ${commit.subject}`,
       });
       const row = el('label', {
-        class: `commit-history-row commit-batch-row${checked ? ' active' : ''}${commit.isMerge ? ' merge disabled' : ''}`,
-        title: commit.isMerge ? 'Merge commits cannot be batch rewritten.' : commit.sha,
+        class: `commit-history-row commit-batch-row${checked ? ' active' : ''}${commit.isMerge ? ' merge' : ''}`,
+        title: commit.sha,
         role: 'checkbox',
-        tabindex: !commit.isMerge && commit.sha === batchFocusSha ? '0' : '-1',
+        tabindex: commit.sha === batchFocusSha ? '0' : '-1',
         'data-sha': commit.sha,
         'aria-checked': String(checked),
-        'aria-disabled': commit.isMerge ? 'true' : null,
       }, [
         el('span', { class: 'commit-batch-check' }, [
           checkbox,
@@ -436,13 +434,16 @@ function selectedBatchCommits() {
 function batchRewriteContext() {
   const selected = selectedBatchCommits();
   const oldest = selected.at(-1) || null;
-  const oldestIndex = oldest
-    ? historyState.commits.findIndex((commit) => commit.sha === oldest.sha)
-    : -1;
+  const affected = new Set();
+  for (const commit of [...(historyState?.commits || [])].reverse()) {
+    if (batchSelected.has(commit.sha) || commit.parents.some((parent) => affected.has(parent))) {
+      affected.add(commit.sha);
+    }
+  }
   return {
     selected,
     oldest,
-    chain: oldestIndex >= 0 ? historyState.commits.slice(0, oldestIndex + 1) : [],
+    chain: (historyState?.commits || []).filter((commit) => affected.has(commit.sha)),
   };
 }
 
@@ -451,9 +452,8 @@ function batchRewriteBlocker() {
   if (rewriteBusy) return 'Rewrite in progress.';
   if (historyState.detached) return 'Check out a local branch before rewriting.';
   if (historyState.dirty) return `Commit or stash ${historyState.changedCount} working-tree change${historyState.changedCount === 1 ? '' : 's'} first.`;
-  const { selected, chain } = batchRewriteContext();
+  const { selected } = batchRewriteContext();
   if (!selected.length) return 'Select at least one commit.';
-  if (chain.some((commit) => commit.isMerge)) return 'The rewrite path crosses a merge commit, which is not supported.';
   if (batchOptions.authorMode === 'preserve' && batchOptions.committerMode === 'preserve' && !batchOptions.reSign) {
     return 'Choose a metadata change first.';
   }
@@ -558,7 +558,7 @@ async function rewriteBatchCommits() {
     detail: [
       ...changes,
       '',
-      `${chain.length} commit hash${chain.length === 1 ? '' : 'es'} will change from ${oldest.shortSha} through HEAD.`,
+      `${chain.length} commit hash${chain.length === 1 ? '' : 'es'} will change across the selected commits and their descendants through HEAD.`,
       `Only local branch ${historyState.branch} will move; remote branches and tags will not.`,
     ].join('\n'),
     confirmText: 'Rewrite selected',
@@ -613,7 +613,6 @@ function rewriteBlocker() {
   if (rewriteBusy) return 'Rewrite in progress.';
   if (historyState.detached) return 'Check out a local branch before rewriting.';
   if (historyState.dirty) return `Commit or stash ${historyState.changedCount} working-tree change${historyState.changedCount === 1 ? '' : 's'} first.`;
-  if (selectedCommit.isMerge) return 'Merge commits are not supported.';
   if (!selectedCommit.isAncestor) return 'This commit is not an ancestor of the current branch.';
   const message = editor?.querySelector('.commit-message-input')?.value.trim();
   if (!message) return 'The commit message cannot be empty.';
